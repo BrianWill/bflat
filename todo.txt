@@ -1,7 +1,3 @@
-
-
 - allow for annotations in parsing top-level forms
 - allow for annotions in parsing class and struct members
-
-
 - qualify method names with namespace or class

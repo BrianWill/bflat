@@ -9,10 +9,10 @@ import (
 
 func parse(readerData []Atom) (TopDefs, error) {
 	topDefs := TopDefs{
-		classes: []ClassDef{},
-		structs: []StructDef{},
-		funcs:   []FuncDef{},
-		globals: []GlobalDef{},
+		Classes: []ClassDef{},
+		Structs: []StructDef{},
+		Funcs:   []FuncDef{},
+		Globals: []GlobalDef{},
 	}
 
 	annotations := []AnnotationForm{}
@@ -43,30 +43,38 @@ func parse(readerData []Atom) (TopDefs, error) {
 			case "class":
 				class, err := parseClass(atom, annotations)
 				if err != nil {
+					spew.Dump(err)
 					return TopDefs{}, nil
 				}
-				topDefs.classes = append(topDefs.classes, class)
+				topDefs.Classes = append(topDefs.Classes, class)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "struct":
-				structDef, err := parseStruct(atom, annotations)
+				structDef, err := parseStruct(atom, annotations, false)
 				if err != nil {
 					return TopDefs{}, nil
 				}
-				topDefs.structs = append(topDefs.structs, structDef)
+				topDefs.Structs = append(topDefs.Structs, structDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "func":
 				funcDef, err := parseFunc(atom, annotations)
 				if err != nil {
 					return TopDefs{}, nil
 				}
-				topDefs.funcs = append(topDefs.funcs, funcDef)
+				topDefs.Funcs = append(topDefs.Funcs, funcDef)
+				annotations = []AnnotationForm{} // reset to empty slice
+			case "interface":
+				interfaceDef, err := parseInterface(atom, annotations)
+				if err != nil {
+					return TopDefs{}, nil
+				}
+				topDefs.Interfaces = append(topDefs.Interfaces, interfaceDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "global":
 				global, err := parseGlobal(atom, annotations)
 				if err != nil {
 					return TopDefs{}, nil
 				}
-				topDefs.globals = append(topDefs.globals, global)
+				topDefs.Globals = append(topDefs.Globals, global)
 				annotations = []AnnotationForm{} // reset to empty slice
 			default:
 				return TopDefs{}, errors.New("Invalid top-level atom: " + spew.Sdump(atom))
@@ -125,71 +133,86 @@ func parseVarExpression(atom Atom) (VarExpression, error) {
 }
 
 func parseClass(parens ParenList, annotations []AnnotationForm) (ClassDef, error) {
-	return ClassDef{}, nil
-}
-
-// get all symbols (as strings) that are at start of slice (stopping at first non-symbol)
-func getLeadingSymbolStrings(atoms []Atom) []string {
-	strs := []string{}
-	for _, atom := range atoms {
-		if symbol, ok := atom.(Symbol); ok {
-			strs = append(strs, symbol.Content)
-		} else {
-			break
-		}
+	structDef, err := parseStruct(parens, annotations, true)
+	if err != nil {
+		return ClassDef{}, err
 	}
-	return strs
+	var parent DataType
+	if len(structDef.Interfaces) > 0 {
+		parent = structDef.Interfaces[0]
+	}
+	return ClassDef{
+		Line:         structDef.Line,
+		Column:       structDef.Column,
+		Type:         structDef.Type,
+		AccessLevel:  structDef.AccessLevel,
+		Parent:       parent,
+		Interfaces:   structDef.Interfaces[1:],
+		Fields:       structDef.Fields,
+		Methods:      structDef.Methods,
+		Constructors: structDef.Constructors,
+		Properties:   structDef.Properties,
+		Annotations:  structDef.Annotations,
+	}, nil
 }
 
-func parseStruct(parens ParenList, annotations []AnnotationForm) (StructDef, error) {
+func parseStruct(parens ParenList, annotations []AnnotationForm, isClass bool) (StructDef, error) {
+	structOrClass := "struct"
+	if isClass {
+		structOrClass = "class"
+	}
 	structDef := StructDef{
 		Annotations: annotations,
 		AccessLevel: PublicAccess,
 	}
 	elems := parens.Atoms
+	if len(elems) < 2 {
+		return StructDef{}, errors.New(strings.Title(structOrClass) + " must have a name: line " + itoa(parens.Line))
+	}
 	idx := 1
-	if len(elems) > idx {
-		return StructDef{}, errors.New("Struct must have a name: line " + itoa(parens.Line))
-	}
-	symbol, ok := elems[idx].(Symbol)
-	if !ok {
-		return StructDef{}, errors.New("Struct must have a name: line " + itoa(parens.Line))
-	}
-	structDef.Name = symbol.Content
-	idx++
-	if len(elems) == idx {
-		return structDef, nil
-	}
 	if atomChain, ok := elems[idx].(AtomChain); ok {
-		if len(atomChain.Atoms) != 2 {
-			return StructDef{}, errors.New("Invalid atom in struct: line " + itoa(parens.Line) + " column: " + itoa(atomChain.Column))
-		}
 		if sigil, ok := atomChain.Atoms[0].(SigilAtom); ok {
-			if sigil.Content != "-" {
-				return StructDef{}, errors.New("Invalid atom in struct: line " + itoa(parens.Line) + " column: " + itoa(atomChain.Column))
+			if sigil.Content == "-" {
+				if symbol, ok := atomChain.Atoms[1].(Symbol); ok {
+					switch symbol.Content {
+					case "priv":
+						structDef.AccessLevel = PrivateAccess
+					case "prot":
+						structDef.AccessLevel = ProtectedAccess
+					default:
+						return StructDef{}, errors.New("Invalid atom in " + structOrClass + ": line " + itoa(parens.Line) + " column: " + itoa(atomChain.Column))
+					}
+				}
+				idx++
 			}
 		}
-		if symbol, ok := atomChain.Atoms[1].(Symbol); ok {
-			switch symbol.Content {
-			case "priv":
-				structDef.AccessLevel = PrivateAccess
-			case "prot":
-				structDef.AccessLevel = ProtectedAccess
-			default:
-				return StructDef{}, errors.New("Invalid atom in struct: line " + itoa(parens.Line) + " column: " + itoa(atomChain.Column))
-			}
-		}
-		idx++
+	}
+	DataType, err := parseDataType(elems[idx])
+	if err != nil {
+		return StructDef{}, errors.New(strings.Title(structOrClass) + " has invalid name: " + err.Error())
+	}
+	structDef.Type = DataType
+	idx++
+	if len(elems) < idx {
+		return structDef, nil
 	}
 	if sigil, ok := elems[idx].(SigilAtom); ok {
 		if sigil.Content == ":" {
 			idx++
-			strs := getLeadingSymbolStrings(elems[idx:])
-			if len(strs) == 0 {
-				return StructDef{}, errors.New("Struct must have at least one interface listed after ':' sigil: line " + itoa(parens.Line))
+			for {
+				if len(elems) < idx {
+					break
+				}
+				DataType, err := parseDataType(elems[idx])
+				if err != nil {
+					break
+				}
+				structDef.Interfaces = append(structDef.Interfaces, DataType)
+				idx++
 			}
-			idx += len(strs)
-			structDef.Interfaces = strs
+			if len(structDef.Interfaces) == 0 {
+				return StructDef{}, errors.New(strings.Title(structOrClass) + " expects at least one interface after colon: " + spew.Sdump(parens))
+			}
 		}
 	}
 	annotations = []AnnotationForm{}
@@ -198,11 +221,11 @@ func parseStruct(parens ParenList, annotations []AnnotationForm) (StructDef, err
 		case ParenList:
 			atoms := atom.Atoms
 			if len(atoms) == 0 {
-				return StructDef{}, errors.New("Invalid struct member: " + spew.Sdump(atom))
+				return StructDef{}, errors.New("Invalid " + structOrClass + " member: " + spew.Sdump(atom))
 			}
 			if sigil, ok := atoms[0].(SigilAtom); ok {
 				if sigil.Content != "@" {
-					return StructDef{}, errors.New("Invalid struct member: " + spew.Sdump(atom))
+					return StructDef{}, errors.New("Invalid " + structOrClass + " member: " + spew.Sdump(atom))
 				}
 				annotation, err := parseAnnotation(atom)
 				if err != nil {
@@ -214,7 +237,7 @@ func parseStruct(parens ParenList, annotations []AnnotationForm) (StructDef, err
 
 			first, ok := atoms[0].(Symbol)
 			if !ok {
-				return StructDef{}, errors.New("Invalid struct member: " + spew.Sdump(atom))
+				return StructDef{}, errors.New("Invalid " + structOrClass + " member: " + spew.Sdump(atom))
 			}
 			switch first.Content {
 			case "f":
@@ -246,10 +269,10 @@ func parseStruct(parens ParenList, annotations []AnnotationForm) (StructDef, err
 				structDef.Constructors = append(structDef.Constructors, constructor)
 				annotations = []AnnotationForm{} // reset to empty slice
 			default:
-				return StructDef{}, errors.New("Invalid struct member: " + spew.Sdump(atom))
+				return StructDef{}, errors.New("Invalid " + structOrClass + " member: " + spew.Sdump(atom))
 			}
 		default:
-			return StructDef{}, errors.New("Invalid struct member: " + spew.Sdump(atom))
+			return StructDef{}, errors.New("Invalid " + structOrClass + " member: " + spew.Sdump(atom))
 		}
 	}
 	return structDef, nil
@@ -270,11 +293,11 @@ func parseField(parens ParenList, annotations []AnnotationForm) (FieldDef, error
 		return FieldDef{}, errors.New("Expecting field name: " + spew.Sdump(parens))
 	}
 	field.Name = symbol.Content
-	typeSpec, err := parseTypeSpec(atoms[2])
+	DataType, err := parseDataType(atoms[2])
 	if err != nil {
 		return FieldDef{}, err
 	}
-	field.Type = typeSpec
+	field.Type = DataType
 	if len(atoms) == 4 {
 		expr, err := parseExpression(atoms[3])
 		if err != nil {
@@ -287,97 +310,100 @@ func parseField(parens ParenList, annotations []AnnotationForm) (FieldDef, error
 	return field, nil
 }
 
-func parseTypeSpec(atom Atom) (TypeSpec, error) {
-	typeSpec := TypeSpec{}
+func parseDataType(atom Atom) (DataType, error) {
+	dataType := DataType{}
 	switch atom := atom.(type) {
 	case Symbol:
 		if atom.Content != strings.Title(atom.Content) {
-			return TypeSpec{}, errors.New("Type name must begin with capital letter")
+			return DataType{}, errors.New("Type name must begin with capital letter")
 		}
-		typeSpec.Name = atom.Content
-		typeSpec.Line = atom.Line
-		typeSpec.Column = atom.Column
+		dataType.Name = atom.Content
+		dataType.Line = atom.Line
+		dataType.Column = atom.Column
 	case AtomChain:
 		atoms := atom.Atoms
 		if len(atoms) < 1 {
-			return TypeSpec{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+			return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 		}
 		if symbol, ok := atoms[0].(Symbol); ok {
 			if symbol.Content != strings.Title(symbol.Content) {
-				return TypeSpec{}, errors.New("Type name must begin with capital letter")
+				return DataType{}, errors.New("Type name must begin with capital letter")
 			}
-			typeSpec.Name = symbol.Content
+			dataType.Name = symbol.Content
 		}
 		if len(atoms) < 2 {
-			return TypeSpec{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+			return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 		}
 		switch second := atoms[1].(type) {
 		case AngleList:
 			angleAtoms := second.Atoms
 			if len(angleAtoms) == 0 {
-				return TypeSpec{}, errors.New("Invalid type spec (empty angle brackets): " + spew.Sdump(atom))
+				return DataType{}, errors.New("Invalid type spec (empty angle brackets): " + spew.Sdump(atom))
 			}
-			typeSpec.TypeParams = []TypeSpec{}
+			dataType.TypeParams = []DataType{}
 			for _, typeAtom := range angleAtoms {
-				ts, err := parseTypeSpec(typeAtom)
+				ts, err := parseDataType(typeAtom)
 				if err != nil {
-					return TypeSpec{}, err
+					return DataType{}, err
 				}
-				typeSpec.TypeParams = append(typeSpec.TypeParams, ts)
+				dataType.TypeParams = append(dataType.TypeParams, ts)
 			}
 			if len(atoms) < 3 {
 				break
 			}
 			namespace, err := parseNamespace(atoms[2:], atom.Line, atom.Column)
 			if err != nil {
-				return TypeSpec{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+				return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 			}
-			typeSpec.Namespace = namespace
+			dataType.Namespace = namespace
 		case SigilAtom:
 			namespace, err := parseNamespace(atoms[1:], atom.Line, atom.Column)
 			if err != nil {
-				return TypeSpec{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+				return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 			}
-			typeSpec.Namespace = namespace
+			dataType.Namespace = namespace
 		default:
 		}
 	default:
-		return TypeSpec{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+		return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 	}
-	return typeSpec, nil
+	return dataType, nil
 }
 
 // expects / sigil followed by one or more symbols separated by dots
-func parseNamespace(atoms []Atom, line int, column int) ([]string, error) {
+func parseNamespace(atoms []Atom, line int, column int) (string, error) {
 	if len(atoms) < 2 {
-		return nil, errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
+		return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 	}
 	if sigil, ok := atoms[0].(SigilAtom); ok {
 		if sigil.Content != "/" {
-			return nil, errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
+			return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 		}
 	} else {
-		return nil, errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
+		return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 	}
 	strs := []string{}
 	for i, atom := range atoms[1:] {
 		if i%2 == 0 {
-			if sigil, ok := atom.(Symbol); ok {
-				strs = append(strs, sigil.Content)
+			if symbol, ok := atom.(Symbol); ok {
+				if symbol.Content != strings.Title(symbol.Content) {
+					return "", errors.New("Improperly formed namespace qualifier (namspace cannot begin with uppercase): line " + itoa(line) + " column " + itoa(column))
+				}
+				strs = append(strs, symbol.Content)
 			} else {
-				return nil, errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
+				return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 			}
 		} else {
 			if sigil, ok := atom.(SigilAtom); ok {
 				if sigil.Content != "." {
-					return nil, errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
+					return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 				}
 			} else {
-				return nil, errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
+				return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 			}
 		}
 	}
-	return strs, nil
+	return strings.Join(strs, "."), nil
 }
 
 func parseExpression(atom Atom) (Expression, error) {
@@ -466,7 +492,6 @@ func parseExpression(atom Atom) (Expression, error) {
 			Line:      atom.Line,
 			Column:    atom.Column,
 			Name:      varExpr.Name,
-			Class:     varExpr.Class,
 			Namespace: varExpr.Namespace,
 			Args:      args,
 		}
@@ -477,15 +502,145 @@ func parseExpression(atom Atom) (Expression, error) {
 }
 
 func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, error) {
-	return MethodDef{}, nil
+	methodDef := MethodDef{
+		Line:        parens.Line,
+		Column:      parens.Column,
+		Annotations: annotations,
+	}
+	atoms := parens.Atoms
+	if len(atoms) < 2 {
+		return MethodDef{}, errors.New("Invalid function definition: " + spew.Sdump(parens))
+	}
+	if symbol, ok := atoms[1].(Symbol); ok {
+		if symbol.Content == strings.Title(symbol.Content) {
+			return MethodDef{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(symbol))
+		}
+		methodDef.Name = symbol.Content
+	}
+	if len(atoms) < 3 {
+		return methodDef, nil
+	}
+	idx := 2
+	DataType, err := parseDataType(atoms[idx])
+	if err == nil {
+		methodDef.ReturnType = DataType
+		idx++
+	}
+	if len(atoms) <= idx {
+		return MethodDef{}, errors.New("Incomplete function definition: " + spew.Sdump(parens))
+	}
+	// params
+	if sigil, ok := atoms[idx].(SigilAtom); ok {
+		if sigil.Content != ":" {
+			return MethodDef{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
+		}
+		idx++
+		params := []ParamDef{}
+		for len(atoms) < idx+2 {
+			symbol, ok := atoms[idx].(Symbol)
+			if !ok {
+				break
+			}
+			DataType, err := parseDataType(atoms[idx+1])
+			if err != nil {
+				return MethodDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
+			}
+			params = append(params, ParamDef{symbol.Content, DataType})
+			idx += 2
+		}
+		methodDef.Params = params
+	}
+	stmts, err := parseBody(atoms[idx:])
+	if err != nil {
+		return MethodDef{}, err
+	}
+	methodDef.Body = stmts
+	return methodDef, nil
 }
 
 func parseProperty(parens ParenList, annotations []AnnotationForm) (PropertyDef, error) {
-	return PropertyDef{}, nil
+	atoms := parens.Atoms
+	splitIdx := len(atoms)
+	if len(atoms) < 4 {
+		return PropertyDef{}, msg(parens.Line, parens.Column, "Too few atoms in property form.")
+	}
+	propertyDef := PropertyDef{
+		Line:        parens.Line,
+		Column:      parens.Column,
+		Annotations: annotations,
+	}
+	if symbol, ok := atoms[1].(Symbol); ok {
+		if symbol.Content == strings.Title(symbol.Content) {
+			return PropertyDef{}, errors.New("Invalid property name (cannot begin with uppercase): " + spew.Sdump(symbol))
+		}
+		propertyDef.Name = symbol.Content
+	}
+	for i, atom := range atoms[3:] {
+		if chain, ok := atom.(AtomChain); ok {
+			if len(chain.Atoms) == 2 {
+				if sigil, ok := chain.Atoms[0].(SigilAtom); ok {
+					if sigil.Content == "-" {
+						if symbol, ok := chain.Atoms[1].(Symbol); ok {
+							if symbol.Content == "set" {
+								splitIdx = i + 1
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	getBody, err := parseBody(atoms[:splitIdx])
+	if err != nil {
+		return PropertyDef{}, err
+	}
+	setBody, err := parseBody(atoms[splitIdx:])
+	if err != nil {
+		return PropertyDef{}, err
+	}
+	propertyDef.GetBody = getBody
+	propertyDef.SetBody = setBody
+	return propertyDef, nil
 }
 
 func parseConstructor(parens ParenList, annotations []AnnotationForm) (ConstructorDef, error) {
-	return ConstructorDef{}, nil
+	constructorDef := ConstructorDef{
+		Line:        parens.Line,
+		Column:      parens.Column,
+		Annotations: annotations,
+	}
+	atoms := parens.Atoms
+	if len(atoms) <= 2 {
+		return ConstructorDef{}, errors.New("Incomplete constructor definition: " + spew.Sdump(parens))
+	}
+	idx := 1
+	// params
+	if sigil, ok := atoms[idx].(SigilAtom); ok {
+		if sigil.Content != ":" {
+			return ConstructorDef{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
+		}
+		idx++
+		params := []ParamDef{}
+		for len(atoms) < idx+2 {
+			symbol, ok := atoms[idx].(Symbol)
+			if !ok {
+				break
+			}
+			DataType, err := parseDataType(atoms[idx+1])
+			if err != nil {
+				return ConstructorDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
+			}
+			params = append(params, ParamDef{symbol.Content, DataType})
+			idx += 2
+		}
+		constructorDef.Params = params
+	}
+	stmts, err := parseBody(atoms[idx:])
+	if err != nil {
+		return ConstructorDef{}, err
+	}
+	constructorDef.Body = stmts
+	return constructorDef, nil
 }
 
 func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) {
@@ -500,15 +655,18 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 		return FuncDef{}, errors.New("Invalid function definition: " + spew.Sdump(parens))
 	}
 	if symbol, ok := atoms[1].(Symbol); ok {
+		if symbol.Content == strings.Title(symbol.Content) {
+			return FuncDef{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(parens))
+		}
 		funcDef.Name = symbol.Content
 	}
 	if len(atoms) < 3 {
 		return funcDef, nil
 	}
 	idx := 2
-	typeSpec, err := parseTypeSpec(atoms[idx])
+	DataType, err := parseDataType(atoms[idx])
 	if err == nil {
-		funcDef.ReturnType = typeSpec
+		funcDef.ReturnType = DataType
 		idx++
 	}
 	if len(atoms) <= idx {
@@ -526,16 +684,16 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 			if !ok {
 				break
 			}
-			typeSpec, err := parseTypeSpec(atoms[idx+1])
+			DataType, err := parseDataType(atoms[idx+1])
 			if err != nil {
 				return FuncDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
-			params = append(params, ParamDef{symbol.Content, typeSpec})
+			params = append(params, ParamDef{symbol.Content, DataType})
 			idx += 2
 		}
 		funcDef.Params = params
 	}
-	stmts, err := parseBody(atoms[idx:], funcDef.ReturnType)
+	stmts, err := parseBody(atoms[idx:])
 	if err != nil {
 		return FuncDef{}, err
 	}
@@ -543,7 +701,7 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 	return funcDef, nil
 }
 
-func parseBody(atoms []Atom, returnType TypeSpec) ([]Statement, error) {
+func parseBody(atoms []Atom) ([]Statement, error) {
 	stmts := []Statement{}
 	for i := 0; i < len(atoms); {
 		atom := atoms[i]
@@ -557,13 +715,39 @@ func parseBody(atoms []Atom, returnType TypeSpec) ([]Statement, error) {
 		elems := parens.Atoms
 		if symbol, ok := elems[0].(Symbol); ok {
 			var stmt Statement
-			var n int
 			var err error
+			n := 1
 			switch symbol.Content {
 			case "if":
-				stmt, n, err = parseIf(atoms[i:], returnType)
+				stmt, n, err = parseIf(atoms[i:])
 			case "for":
-			case "":
+				stmt, err = parseFor(elems, symbol.Line, symbol.Column)
+			case "return":
+				stmt, err = parseReturn(elems, symbol.Line, symbol.Column)
+			case "switch":
+				stmt, n, err = parseSwitch(atoms[i:])
+			case "throw":
+				stmt, err = parseThrow(elems, symbol.Line, symbol.Column)
+			case "try":
+				stmt, n, err = parseTry(atoms[i:])
+			case "break":
+				stmt, err = parseBreak(elems, symbol.Line, symbol.Column)
+			case "continue":
+				stmt, err = parseContinue(elems, symbol.Line, symbol.Column)
+			case "var":
+				stmt, err = parseVar(elems, symbol.Line, symbol.Column)
+			case "as":
+				stmt, err = parseAssignment(elems, symbol.Line, symbol.Column)
+			default:
+				expr, err := parseExpression(atoms[i])
+				if err != nil {
+					return nil, err
+				}
+				call, ok := expr.(CallForm)
+				if !ok {
+					return nil, errors.New("Improper expression as statement: " + spew.Sdump(atoms[i]))
+				}
+				stmt = call
 			}
 			if err != nil {
 				return nil, err
@@ -585,7 +769,7 @@ func parseBody(atoms []Atom, returnType TypeSpec) ([]Statement, error) {
 	return stmts, nil
 }
 
-func parseIf(atoms []Atom, returnType TypeSpec) (IfForm, int, error) {
+func parseIf(atoms []Atom) (IfForm, int, error) {
 	ifForm := IfForm{}
 	// parse if clause
 	ifAtoms := atoms[0].(ParenList).Atoms
@@ -597,8 +781,7 @@ func parseIf(atoms []Atom, returnType TypeSpec) (IfForm, int, error) {
 	if err != nil {
 		return IfForm{}, 0, err
 	}
-	// TODO check that condition is boolean expression
-	ifForm.Body, err = parseBody(ifAtoms[2:], returnType)
+	ifForm.Body, err = parseBody(ifAtoms[2:])
 	if err != nil {
 		return IfForm{}, 0, err
 	}
@@ -627,16 +810,15 @@ Loop:
 			if err != nil {
 				return IfForm{}, 0, err
 			}
-			// TODO check that condition is boolean expression
 			ifForm.ElifConds = append(ifForm.ElifConds, condition)
-			body, err := parseBody(elems[2:], returnType)
+			body, err := parseBody(elems[2:])
 			if err != nil {
 				return IfForm{}, 0, err
 			}
 			ifForm.ElifBodies = append(ifForm.ElifBodies, body)
 			n++
 		case "else":
-			ifForm.ElseBody, err = parseBody(elems[1:], returnType)
+			ifForm.ElseBody, err = parseBody(elems[1:])
 			if err != nil {
 				return IfForm{}, 0, err
 			}
@@ -649,10 +831,382 @@ Loop:
 	return ifForm, n, nil
 }
 
-func parseAssignment(atoms []Atom) (AssignmentForm, error) {
-	return AssignmentForm{}, nil
+func parseAssignment(atoms []Atom, line int, column int) (AssignmentForm, error) {
+	if len(atoms) != 3 {
+		return AssignmentForm{}, errors.New("Assignment statement has wrong number of elements: " + spew.Sdump(atoms))
+	}
+	varExpr, err := parseVarExpression(atoms[1])
+	if err != nil {
+		return AssignmentForm{}, err
+	}
+	assignmentForm := AssignmentForm{
+		Line:   line,
+		Column: column,
+		Target: varExpr,
+	}
+	assignmentForm.Value, err = parseExpression(atoms[2])
+	if err != nil {
+		return AssignmentForm{}, err
+	}
+	return assignmentForm, nil
+}
+
+func parseReturn(atoms []Atom, line int, column int) (ReturnForm, error) {
+	if len(atoms) != 2 {
+		return ReturnForm{}, errors.New("Return statement has wrong number of elements: " + spew.Sdump(atoms))
+	}
+	expr, err := parseExpression(atoms[1])
+	if err != nil {
+		return ReturnForm{}, err
+	}
+	returnForm := ReturnForm{
+		Line:   line,
+		Column: column,
+		Value:  expr,
+	}
+	return returnForm, nil
+}
+
+func parseThrow(atoms []Atom, line int, column int) (ThrowForm, error) {
+	if len(atoms) != 2 {
+		return ThrowForm{}, errors.New("Throw statement has wrong number of elements: " + spew.Sdump(atoms))
+	}
+	expr, err := parseExpression(atoms[1])
+	if err != nil {
+		return ThrowForm{}, err
+	}
+	throwForm := ThrowForm{
+		Line:   line,
+		Column: column,
+		Value:  expr,
+	}
+	return throwForm, nil
+}
+
+func parseBreak(atoms []Atom, line int, column int) (BreakForm, error) {
+	breakForm := BreakForm{
+		Line:   line,
+		Column: column,
+	}
+	if len(atoms) == 2 {
+		symbol, ok := atoms[1].(Symbol)
+		if !ok {
+			return BreakForm{}, errors.New("Break statement has invalid label: " + spew.Sdump(atoms))
+		}
+		breakForm.Label = symbol.Content
+	} else if len(atoms) == 1 {
+	} else {
+		return BreakForm{}, errors.New("Break statement has wrong number of elements: " + spew.Sdump(atoms))
+	}
+	return breakForm, nil
+}
+
+func parseContinue(atoms []Atom, line int, column int) (ContinueForm, error) {
+	continueForm := ContinueForm{
+		Line:   line,
+		Column: column,
+	}
+	if len(atoms) == 2 {
+		symbol, ok := atoms[1].(Symbol)
+		if !ok {
+			return ContinueForm{}, errors.New("Continue statement has invalid label: " + spew.Sdump(atoms))
+		}
+		continueForm.Label = symbol.Content
+	} else if len(atoms) == 1 {
+	} else {
+		return ContinueForm{}, errors.New("Continue statement has wrong number of elements: " + spew.Sdump(atoms))
+	}
+	return continueForm, nil
+}
+
+func parseFor(atoms []Atom, line int, column int) (ForForm, error) {
+	if len(atoms) < 3 {
+		return ForForm{}, errors.New("For statement has too few elements: " + spew.Sdump(atoms))
+	}
+	condition, err := parseExpression(atoms[1])
+	if err != nil {
+		return ForForm{}, err
+	}
+	stmts, err := parseBody(atoms[2:])
+	if err != nil {
+		return ForForm{}, err
+	}
+	forForm := ForForm{
+		Line:      line,
+		Column:    column,
+		Condition: condition,
+		Body:      stmts,
+	}
+	return forForm, nil
+}
+
+func parseVar(atoms []Atom, line int, column int) (VarForm, error) {
+	if len(atoms) != 3 && len(atoms) != 4 {
+		return VarForm{}, errors.New("Var statement has wrong number of elements: " + spew.Sdump(atoms))
+	}
+	symbol, ok := atoms[1].(Symbol)
+	if !ok {
+		return VarForm{}, errors.New("Var statement expecting symbol for name: " + spew.Sdump(atoms))
+	}
+	if symbol.Content == strings.Title(symbol.Content) {
+		return VarForm{}, errors.New("Local variable name must start lowercase: " + spew.Sdump(atoms))
+	}
+	varForm := VarForm{
+		Line:   line,
+		Column: column,
+		Target: symbol.Content,
+	}
+	valIdx := 2
+	var err error
+	if len(atoms) == 4 {
+		varForm.Type, err = parseDataType(atoms[2])
+		if err != nil {
+			return VarForm{}, err
+		}
+		valIdx = 3
+	}
+	varForm.Value, err = parseExpression(atoms[valIdx])
+	if err != nil {
+		return VarForm{}, err
+	}
+	return varForm, nil
+}
+
+func parseSwitch(atoms []Atom) (SwitchForm, int, error) {
+	switchForm := SwitchForm{}
+	// parse if clause
+	switchAtoms := atoms[0].(ParenList).Atoms
+	if len(switchAtoms) < 2 {
+		return SwitchForm{}, 0, errors.New("Invalid switch form (expecting value): " + spew.Sdump(atoms))
+	}
+	var err error
+	switchForm.Value, err = parseExpression(switchAtoms[1])
+	if err != nil {
+		return SwitchForm{}, 0, err
+	}
+	// parse case clauses and default clause
+	n := 1
+Loop:
+	for _, atom := range atoms {
+		parens, ok := atom.(ParenList)
+		if !ok {
+			break Loop
+		}
+		if len(parens.Atoms) == 0 {
+			break Loop
+		}
+		elems := parens.Atoms
+		symbol, ok := elems[0].(Symbol)
+		if !ok {
+			break Loop
+		}
+		switch symbol.Content {
+		case "case":
+			if len(elems) < 2 {
+				return SwitchForm{}, 0, errors.New("Invalid elif clause (expecting condition): " + spew.Sdump(elems))
+			}
+			val, err := parseExpression(elems[1])
+			if err != nil {
+				return SwitchForm{}, 0, err
+			}
+			switchForm.CaseValues = append(switchForm.CaseValues, val)
+			body, err := parseBody(elems[2:])
+			if err != nil {
+				return SwitchForm{}, 0, err
+			}
+			switchForm.CaseBodies = append(switchForm.CaseBodies, body)
+			n++
+		case "default":
+			switchForm.DefaultBody, err = parseBody(elems[1:])
+			if err != nil {
+				return SwitchForm{}, 0, err
+			}
+			n++
+			break Loop
+		default:
+			break Loop
+		}
+	}
+	return switchForm, n, nil
+}
+
+func parseTry(atoms []Atom) (TryForm, int, error) {
+	tryForm := TryForm{}
+	// parse if clause
+	ifAtoms := atoms[0].(ParenList).Atoms
+	if len(ifAtoms) < 2 {
+		return TryForm{}, 0, errors.New("Invalid try form (expecting body): " + spew.Sdump(atoms))
+	}
+	var err error
+	tryForm.Body, err = parseBody(ifAtoms[1:])
+	if err != nil {
+		return TryForm{}, 0, err
+	}
+	// parse catch clauses and finally clause
+	n := 1
+Loop:
+	for _, atom := range atoms {
+		parens, ok := atom.(ParenList)
+		if !ok {
+			break Loop
+		}
+		if len(parens.Atoms) == 0 {
+			break Loop
+		}
+		elems := parens.Atoms
+		symbol, ok := elems[0].(Symbol)
+		if !ok {
+			break Loop
+		}
+		switch symbol.Content {
+		case "catch":
+			if len(elems) < 2 {
+				return TryForm{}, 0, errors.New("Invalid catch clause (expecting type): " + spew.Sdump(elems))
+			}
+			DataType, err := parseDataType(elems[1])
+			if err != nil {
+				return TryForm{}, 0, err
+			}
+			tryForm.CatchTypes = append(tryForm.CatchTypes, DataType)
+			body, err := parseBody(elems[2:])
+			if err != nil {
+				return TryForm{}, 0, err
+			}
+			tryForm.CatchBodies = append(tryForm.CatchBodies, body)
+			n++
+		case "finally":
+			tryForm.FinallyBody, err = parseBody(elems[1:])
+			if err != nil {
+				return TryForm{}, 0, err
+			}
+			n++
+			break Loop
+		default:
+			break Loop
+		}
+	}
+	return tryForm, n, nil
 }
 
 func parseGlobal(parens ParenList, annotations []AnnotationForm) (GlobalDef, error) {
-	return GlobalDef{}, nil
+	globalDef := GlobalDef{
+		Line:        parens.Line,
+		Column:      parens.Column,
+		Annotations: annotations,
+	}
+	atoms := parens.Atoms
+	if len(atoms) < 3 {
+		return GlobalDef{}, errors.New("Invalid global: " + spew.Sdump(parens))
+	}
+	symbol, ok := atoms[1].(Symbol)
+	if !ok {
+		return GlobalDef{}, errors.New("Expecting global name: " + spew.Sdump(parens))
+	}
+	globalDef.Name = symbol.Content
+	DataType, err := parseDataType(atoms[2])
+	if err != nil {
+		return GlobalDef{}, err
+	}
+	globalDef.Type = DataType
+	if len(atoms) == 4 {
+		expr, err := parseExpression(atoms[3])
+		if err != nil {
+			return GlobalDef{}, err
+		}
+		globalDef.Value = expr
+	} else if len(atoms) > 4 {
+		return GlobalDef{}, errors.New("Too many atoms in global: " + spew.Sdump(parens))
+	}
+	return globalDef, nil
+}
+
+func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDef, error) {
+	interfaceDef := InterfaceDef{
+		Annotations: annotations,
+		AccessLevel: PublicAccess,
+	}
+	elems := parens.Atoms
+	if len(elems) < 2 {
+		return InterfaceDef{}, errors.New("Interface must have a name: line " + itoa(parens.Line))
+	}
+	idx := 1
+	if atomChain, ok := elems[idx].(AtomChain); ok {
+		if sigil, ok := atomChain.Atoms[0].(SigilAtom); ok {
+			if sigil.Content == "-" {
+				if symbol, ok := atomChain.Atoms[1].(Symbol); ok {
+					switch symbol.Content {
+					case "priv":
+						interfaceDef.AccessLevel = PrivateAccess
+					case "prot":
+						interfaceDef.AccessLevel = ProtectedAccess
+					default:
+						return InterfaceDef{}, errors.New("Invalid atom in interface: line " + itoa(parens.Line) + " column: " + itoa(atomChain.Column))
+					}
+				}
+				idx++
+			}
+		}
+	}
+	DataType, err := parseDataType(elems[idx])
+	if err != nil {
+		return InterfaceDef{}, errors.New("Interface has invalid name: " + err.Error())
+	}
+	interfaceDef.Type = DataType
+	idx++
+	for _, atom := range elems[idx:] {
+		parens, ok := atom.(ParenList)
+		if !ok {
+			return InterfaceDef{}, errors.New("Invalid atom in interface method signature. " + spew.Sdump(parens))
+		}
+		methodSig, err := parseMethodSignature(parens)
+		if err != nil {
+			return InterfaceDef{}, err
+		}
+		interfaceDef.MethodSignatures = append(interfaceDef.MethodSignatures, methodSig)
+	}
+	return interfaceDef, nil
+}
+
+func parseMethodSignature(parens ParenList) (MethodSignature, error) {
+	methodSignature := MethodSignature{
+		Line:   parens.Line,
+		Column: parens.Column,
+	}
+	atoms := parens.Atoms
+	if len(atoms) < 2 {
+		return MethodSignature{}, errors.New("Invalid function definition: " + spew.Sdump(parens))
+	}
+	if symbol, ok := atoms[1].(Symbol); ok {
+		if symbol.Content == strings.Title(symbol.Content) {
+			return MethodSignature{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(symbol))
+		}
+		methodSignature.Name = symbol.Content
+	}
+	if len(atoms) < 3 {
+		return methodSignature, nil
+	}
+	idx := 2
+	DataType, err := parseDataType(atoms[idx])
+	if err == nil {
+		methodSignature.ReturnType = DataType
+		idx++
+	}
+	if len(atoms) <= idx {
+		return MethodSignature{}, errors.New("Incomplete function definition: " + spew.Sdump(parens))
+	}
+	// params
+	if sigil, ok := atoms[idx].(SigilAtom); ok {
+		if sigil.Content != ":" {
+			return MethodSignature{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
+		}
+		idx++
+		for _, atom := range atoms[idx:] {
+			DataType, err := parseDataType(atom)
+			if err != nil {
+				return MethodSignature{}, errors.New("Invalid parameter type: " + spew.Sdump(atom))
+			}
+			methodSignature.Params = append(methodSignature.Params, DataType)
+		}
+	}
+	return methodSignature, nil
 }
