@@ -4,10 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"strconv"
 	"time"
-
-	"github.com/davecgh/go-spew/spew"
 )
 
 type Token struct {
@@ -158,7 +157,8 @@ type FuncDef struct {
 	Line        int
 	Column      int
 	Name        string
-	Params      []ParamDef
+	ParamTypes  []DataType
+	ParamNames  []string
 	ReturnType  DataType
 	Body        []Statement
 	Annotations []AnnotationForm
@@ -194,6 +194,7 @@ type StructInfo struct {
 type InterfaceInfo struct {
 	Name      string
 	Namespace string
+	Parents   []*InterfaceInfo
 }
 
 type GlobalInfo struct {
@@ -202,8 +203,11 @@ type GlobalInfo struct {
 }
 
 type FuncInfo struct {
-	Name      string
-	Namespace string
+	Name       string
+	Namespace  string
+	ParamNames []string
+	ParamTypes []DataType
+	ReturnType DataType
 }
 
 type MethodInfo struct {
@@ -274,11 +278,6 @@ type TryForm struct {
 	CatchTypes  []DataType // CaseValues and Casebodies are parallel
 	CatchBodies [][]Statement
 	FinallyBody []Statement
-}
-
-type ParamDef struct {
-	Name string
-	Type DataType
 }
 
 type DataType struct {
@@ -397,7 +396,8 @@ type MethodDef struct {
 	Line        int
 	Column      int
 	Name        string
-	Params      []ParamDef
+	ParamTypes  []DataType
+	ParamNames  []string
 	ReturnType  DataType
 	Body        []Statement
 	Annotations []AnnotationForm
@@ -406,7 +406,8 @@ type MethodDef struct {
 type ConstructorDef struct {
 	Line        int
 	Column      int
-	Params      []ParamDef
+	ParamTypes  []DataType
+	ParamNames  []string
 	Body        []Statement
 	Annotations []AnnotationForm
 }
@@ -512,19 +513,50 @@ type TopDefs struct {
 	Globals    []GlobalDef
 }
 
+const GlobalsClass = "_Globals"
+const FuncsClass = "_Funcs"
+
 type Namespace struct {
 	Name       string
 	Classes    map[string]*ClassInfo
 	Structs    map[string]*StructInfo
 	Interfaces map[string]*InterfaceInfo
-	Funcs      map[string][]FuncInfo
-	Methods    map[string][]MethodInfo
+	Funcs      map[string][]*FuncInfo
+	Methods    map[string][]*MethodInfo
 	Globals    map[string]*GlobalInfo
 	FullNames  map[string]string // unqualifieid name -> fully qualified name
 }
 
 var StrType = DataType{
 	Name: "Str",
+}
+
+var BoolType = DataType{
+	Name: "Bool",
+}
+
+var IntType = DataType{
+	Name: "I",
+}
+
+var LongIntType = DataType{
+	Name: "II",
+}
+
+var FloatType = DataType{
+	Name: "F",
+}
+
+var DoubleType = DataType{
+	Name: "FF",
+}
+
+var ByteType = DataType{
+	Name: "Byte",
+}
+
+var SignedByteType = DataType{
+	Name: "SByte",
 }
 
 func main() {
@@ -564,33 +596,16 @@ func main() {
 		return
 	}
 
-	spew.Dump(code)
-
 	debug("Time: ", time.Since(start))
-	return
 
-	// outputFilename := inputFilename + ".go"
-	// err = ioutil.WriteFile(outputFilename, []byte(code), os.ModePerm)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	return
-	// }
+	outputFilename := inputFilename + ".cs"
+	err = ioutil.WriteFile(outputFilename, []byte(code), os.ModePerm)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
-	// err = exec.Command("go", "fmt", outputFilename).Run()
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	return
-	// }
-
-	// cmd := exec.Command("go", "run", outputFilename)
-	// cmd.Stdin = os.Stdin
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
-	// err = cmd.Run()
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	return
-	// }
+	// todo: use https://github.com/dotnet/codeformatter to format the code
 }
 
 func msg(line int, column int, s string) error {

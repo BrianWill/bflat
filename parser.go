@@ -521,9 +521,9 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 		return methodDef, nil
 	}
 	idx := 2
-	DataType, err := parseDataType(atoms[idx])
+	dt, err := parseDataType(atoms[idx])
 	if err == nil {
-		methodDef.ReturnType = DataType
+		methodDef.ReturnType = dt
 		idx++
 	}
 	if len(atoms) <= idx {
@@ -535,20 +535,23 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 			return MethodDef{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
 		}
 		idx++
-		params := []ParamDef{}
+		paramNames := []string{}
+		paramTypes := []DataType{}
 		for len(atoms) < idx+2 {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
 			}
-			DataType, err := parseDataType(atoms[idx+1])
+			dt, err := parseDataType(atoms[idx+1])
 			if err != nil {
 				return MethodDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
-			params = append(params, ParamDef{symbol.Content, DataType})
+			paramNames = append(paramNames, symbol.Content)
+			paramTypes = append(paramTypes, dt)
 			idx += 2
 		}
-		methodDef.Params = params
+		methodDef.ParamNames = paramNames
+		methodDef.ParamTypes = paramTypes
 	}
 	stmts, err := parseBody(atoms[idx:])
 	if err != nil {
@@ -620,20 +623,23 @@ func parseConstructor(parens ParenList, annotations []AnnotationForm) (Construct
 			return ConstructorDef{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
 		}
 		idx++
-		params := []ParamDef{}
+		paramNames := []string{}
+		paramTypes := []DataType{}
 		for len(atoms) < idx+2 {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
 			}
-			DataType, err := parseDataType(atoms[idx+1])
+			dt, err := parseDataType(atoms[idx+1])
 			if err != nil {
 				return ConstructorDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
-			params = append(params, ParamDef{symbol.Content, DataType})
+			paramNames = append(paramNames, symbol.Content)
+			paramTypes = append(paramTypes, dt)
 			idx += 2
 		}
-		constructorDef.Params = params
+		constructorDef.ParamNames = paramNames
+		constructorDef.ParamTypes = paramTypes
 	}
 	stmts, err := parseBody(atoms[idx:])
 	if err != nil {
@@ -664,9 +670,9 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 		return funcDef, nil
 	}
 	idx := 2
-	DataType, err := parseDataType(atoms[idx])
+	dt, err := parseDataType(atoms[idx])
 	if err == nil {
-		funcDef.ReturnType = DataType
+		funcDef.ReturnType = dt
 		idx++
 	}
 	if len(atoms) <= idx {
@@ -678,20 +684,23 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 			return FuncDef{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
 		}
 		idx++
-		params := []ParamDef{}
+		paramNames := []string{}
+		paramTypes := []DataType{}
 		for len(atoms) < idx+2 {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
 			}
-			DataType, err := parseDataType(atoms[idx+1])
+			dt, err := parseDataType(atoms[idx+1])
 			if err != nil {
 				return FuncDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
-			params = append(params, ParamDef{symbol.Content, DataType})
+			paramNames = append(paramNames, symbol.Content)
+			paramTypes = append(paramTypes, dt)
 			idx += 2
 		}
-		funcDef.Params = params
+		funcDef.ParamNames = paramNames
+		funcDef.ParamTypes = paramTypes
 	}
 	stmts, err := parseBody(atoms[idx:])
 	if err != nil {

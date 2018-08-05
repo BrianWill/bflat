@@ -2,18 +2,36 @@ package main
 
 import (
 	"errors"
-
-	"github.com/davecgh/go-spew/spew"
+	"math"
+	"strconv"
+	"strings"
 )
 
 func compile(topDefs TopDefs) (string, error) {
-
 	ns, err := createNamespace(topDefs)
 	if err != nil {
 		return "", err
 	}
-	spew.Dump(ns)
-	return "", nil
+
+	code := ""
+
+	c, err := compileGlobals(topDefs.Globals, ns)
+	if err != nil {
+		return "", err
+	}
+	code += c
+
+	code += "public class " + FuncsClass + " {\n"
+	for _, fn := range topDefs.Funcs {
+		c, err := compileFunc(fn, ns, "\t")
+		if err != nil {
+			return "", err
+		}
+		code += c
+	}
+	code += "}"
+
+	return code, nil
 }
 
 func createNamespace(topDefs TopDefs) (*Namespace, error) {
@@ -21,6 +39,7 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 	classes := map[string]*ClassInfo{}
 	structs := map[string]*StructInfo{}
 	globals := map[string]*GlobalInfo{}
+	funcs := map[string][]*FuncInfo{}
 
 	fullNames := map[string]string{} // unqualified names -> fully qualified names
 	// todo populate classes and fullNames with imports
@@ -113,41 +132,146 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 		classInfo.Parent = parentInfo
 	}
 
+	for _, fn := range topDefs.Funcs {
+		fullName := fn.Name + "/" + topDefs.Namespace
+		fullNames[fn.Name] = fullName
+		funcs[fullName] = append(funcs[fullName],
+			&FuncInfo{
+				Name:       fn.Name,
+				Namespace:  topDefs.Namespace,
+				ParamNames: fn.ParamNames,
+				ParamTypes: fn.ParamTypes,
+				ReturnType: fn.ReturnType,
+			},
+		)
+	}
+
 	return &Namespace{
 		Classes:    classes,
 		Structs:    structs,
 		Interfaces: interfaces,
 		Globals:    globals,
+		Funcs:      funcs,
 	}, nil
+}
 
+func fullName(name string, namespace string, ns *Namespace) string {
+	if namespace == "" {
+		return ns.FullNames[name]
+	}
+	return name + "/" + namespace
+}
+
+func (dt DataType) fullName(ns *Namespace) string {
+	return fullName(dt.Name, dt.Namespace, ns)
 }
 
 func isType(child DataType, parent DataType, ns *Namespace, exact bool) bool {
-	if child.Name != parent.Name ||
-		child.Namespace != parent.Namespace ||
-		len(child.TypeParams) != len(parent.TypeParams) {
-		if !isDescendent(child, parent, ns) &&
-			!isImplementor(child, parent, ns) {
-			return false
+	if parent.Name == "Any" && parent.Namespace == "" {
+		return true
+	}
+
+	childFull := child.fullName(ns)
+	parentFull := parent.fullName(ns)
+
+	if childFull == parentFull {
+		return true
+	}
+
+	// structs are only subtypes of themselves
+	if _, ok := ns.Structs[childFull]; ok {
+		return false
+	}
+	if _, ok := ns.Structs[parentFull]; ok {
+		return false
+	}
+
+	if parentInterface, ok := ns.Interfaces[parentFull]; ok {
+		if childInterface, ok := ns.Interfaces[childFull]; ok {
+			return childInterface.isImplementor(parentInterface)
+		}
+
+		if childClass, ok := ns.Classes[childFull]; ok {
+			return childClass.isImplementor(parentInterface)
+		}
+
+		if childStruct, ok := ns.Structs[childFull]; ok {
+			return childStruct.isImplementor(parentInterface)
+		}
+
+		return false
+	}
+
+	if parentClass, ok := ns.Classes[parentFull]; ok {
+		if childClass, ok := ns.Classes[childFull]; ok {
+			return childClass.isDescendent(parentClass)
+		} else {
+			return false // subtype of a class can only be another class
 		}
 	}
-	for i, childParam := range child.TypeParams {
-		if !isType(childParam, parent.TypeParams[i], ns, exact) {
-			return false
-		}
-	}
+
+	//// todo: account for type params
+	// for i, childParam := range child.TypeParams {
+	// 	if !isType(childParam, parent.TypeParams[i], ns, exact) {
+	// 		return false
+	// 	}
+	// }
 	return true
 }
 
-func isDescendent(child DataType, parent DataType, ns *Namespace) bool {
-	return false // todo
+func (si *StructInfo) isImplementor(ii *InterfaceInfo) bool {
+	for _, interfaceInfo := range si.Interfaces {
+		if interfaceInfo == ii {
+			return true
+		}
+	}
+	return false
 }
 
-func isImplementor(child DataType, interfaceType DataType, ns *Namespace) bool {
-	return false // todo
+func (ci *ClassInfo) isImplementor(ii *InterfaceInfo) bool {
+	for ; ci != nil; ci = ci.Parent {
+		for _, interfaceInfo := range ci.Interfaces {
+			if interfaceInfo == ii {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (ci *ClassInfo) isDescendent(ancestor *ClassInfo) bool {
+	for ; ci != nil; ci = ci.Parent {
+		if ci == ancestor {
+			return true
+		}
+	}
+	return false
+}
+
+func (ci *InterfaceInfo) isImplementor(ii *InterfaceInfo) bool {
+	if ci == ii {
+		return true
+	}
+	return false
 }
 
 func isValidType(dt DataType, ns *Namespace) bool {
+	full := fullName(dt.Name, dt.Namespace, ns)
+
+	if _, ok := ns.Interfaces[full]; ok {
+		return true
+	}
+
+	if _, ok := ns.Classes[full]; ok {
+		return true
+	}
+
+	if _, ok := ns.Structs[full]; ok {
+		return true
+	}
+
+	// todo: account for built-in types
+
 	return false
 }
 
@@ -163,12 +287,12 @@ func getSignatures(name string, nsStr string, ns *Namespace) ([]Signature, []str
 	return nil, nil
 }
 
-func compileExpression(expr Expression, namespace *Namespace, locals map[string]DataType) (string, DataType, error) {
+func compileExpression(expr Expression, ns *Namespace, expectedType DataType, locals map[string]DataType) (string, DataType, error) {
 	var dt DataType
 	var code string
 	switch expr := expr.(type) {
 	case VarExpression:
-		dt, code = getGlobal(expr.Name, expr.Namespace, namespace)
+		dt, code = getGlobal(expr.Name, expr.Namespace, ns)
 		if code == "" { // no global found
 			if expr.Namespace != "" {
 				return "", DataType{}, msg(expr.Line, expr.Column, "No global variable found of name: "+expr.Name+"/"+expr.Namespace)
@@ -181,11 +305,73 @@ func compileExpression(expr Expression, namespace *Namespace, locals map[string]
 			code = expr.Name
 		}
 	case ParsedNumberAtom:
-		// if floating-point, check if within range of float and append 'f'
+		if expectedType.Name == "" {
+			if strings.Contains(expr.Value, ".") {
+				code = "(double) " + expr.Value
+				dt = DoubleType
+			} else {
+				val, err := strconv.Atoi(expr.Value)
+				if err != nil {
+					return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int number literal.")
+				}
+				if val > math.MaxInt32 || val < math.MinInt32 {
+					return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int number literal but magnitude is too great.")
+				}
+				code = "(int) " + expr.Value
+				dt = IntType
+			}
+		} else if expectedType.Name == IntType.Name {
+			val, err := strconv.Atoi(expr.Value)
+			if err != nil {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int number literal.")
+			}
+			if val > math.MaxInt32 || val < math.MinInt32 {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int number literal but magnitude is too great.")
+			}
+			code = "(int) " + expr.Value
+			dt = IntType
+		} else if expectedType.Name == LongIntType.Name {
+			_, err := strconv.Atoi(expr.Value)
+			if err != nil {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting II number literal, but value is not integer or out of range.")
+			}
+			code = "(long) " + expr.Value
+			dt = LongIntType
+		} else if expectedType.Name == FloatType.Name {
+			// todo check within float range
+			code = "(float) " + expr.Value
+			dt = FloatType
+		} else if expectedType.Name == DoubleType.Name {
+			// todo check within double range
+			code = "(double) " + expr.Value
+			dt = DoubleType
+		} else if expectedType.Name == ByteType.Name {
+			val, err := strconv.Atoi(expr.Value)
+			if err != nil {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Byte number literal.")
+			}
+			if val > math.MaxUint8 || val < 0 {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Byte number literal but value is out of range.")
+			}
+			code = "(byte) " + expr.Value
+			dt = ByteType
+		} else if expectedType.Name == SignedByteType.Name {
+			val, err := strconv.Atoi(expr.Value)
+			if err != nil {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting SByte number literal.")
+			}
+			if val > math.MaxInt8 || val < math.MinInt8 {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting SByte number literal but value is out of range.")
+			}
+			code = "(sbyte) " + expr.Value
+			dt = SignedByteType
+		} else {
+			return "", DataType{}, msg(expr.Line, expr.Column, "Non-number type given as expected type for a number literal.")
+		}
 	case StringAtom:
 		return "\"" + expr.Content[1:len(expr.Content)-1] + "\"", StrType, nil
 	case CallForm:
-		return compileCallForm(expr, namespace, locals)
+		return compileCallForm(expr, ns, locals)
 	case DataType:
 		return "", DataType{}, errors.New("Expected expression, got DataType: line " + itoa(expr.Line) + " column " + itoa(expr.Column))
 	}
@@ -193,7 +379,7 @@ func compileExpression(expr Expression, namespace *Namespace, locals map[string]
 }
 
 func compileGlobals(globals []GlobalDef, ns *Namespace) (string, error) {
-	code := "public class _Globals {"
+	code := "public class " + GlobalsClass + " {"
 	for _, g := range globals {
 		c, err := compileType(g.Type, ns)
 		if err != nil {
@@ -201,7 +387,7 @@ func compileGlobals(globals []GlobalDef, ns *Namespace) (string, error) {
 		}
 		code += c + " " + g.Name
 		if g.Value != nil {
-			c, returnedType, err := compileExpression(g.Value, ns, map[string]DataType{})
+			c, returnedType, err := compileExpression(g.Value, ns, g.Type, map[string]DataType{})
 			if err != nil {
 				return "", err
 			}
@@ -258,8 +444,8 @@ func compileType(dt DataType, ns *Namespace) (string, error) {
 }
 
 func compileIfForm(s IfForm, returnType DataType,
-	ns *Namespace, locals map[string]DataType, insideLoop bool) (string, error) {
-	c, conditionType, err := compileExpression(s.Condition, ns, locals)
+	ns *Namespace, locals map[string]DataType, insideLoop bool, indent string) (string, error) {
+	c, conditionType, err := compileExpression(s.Condition, ns, BoolType, locals)
 	if err != nil {
 		return "", err
 	}
@@ -267,13 +453,13 @@ func compileIfForm(s IfForm, returnType DataType,
 		return "", msg(s.Line, s.Column, "The 'if' condition must return a boolean.")
 	}
 	code := "if (" + c + ") {\n"
-	c, err = compileBody(s.Body, returnType, ns, locals, insideLoop, false)
+	c, err = compileBody(s.Body, returnType, ns, locals, insideLoop, false, indent+"\t")
 	if err != nil {
 		return "", nil
 	}
 	code += c + "\n}"
 	for i, elif := range s.ElifConds {
-		c, conditionType, err := compileExpression(elif, ns, locals)
+		c, conditionType, err := compileExpression(elif, ns, BoolType, locals)
 		if err != nil {
 			return "", err
 		}
@@ -281,14 +467,14 @@ func compileIfForm(s IfForm, returnType DataType,
 			return "", msg(s.Line, s.Column, "Elif condition expression does not return a boolean.")
 		}
 		code += " else if (" + c + ") {\n"
-		c, err = compileBody(s.ElifBodies[i], returnType, ns, locals, insideLoop, false)
+		c, err = compileBody(s.ElifBodies[i], returnType, ns, locals, insideLoop, false, indent+"\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "}"
 	}
 	if len(s.ElseBody) > 0 {
-		c, err := compileBody(s.ElseBody, returnType, ns, locals, insideLoop, false)
+		c, err := compileBody(s.ElseBody, returnType, ns, locals, insideLoop, false, indent+"\t")
 		if err != nil {
 			return "", err
 		}
@@ -298,7 +484,8 @@ func compileIfForm(s IfForm, returnType DataType,
 }
 
 func compileBody(statements []Statement, returnType DataType,
-	ns *Namespace, locals map[string]DataType, insideLoop bool, requiresReturn bool) (string, error) {
+	ns *Namespace, locals map[string]DataType, insideLoop bool,
+	requiresReturn bool, indent string) (string, error) {
 	code := ""
 	if requiresReturn {
 		// len(statments) will not be 0
@@ -311,46 +498,67 @@ func compileBody(statements []Statement, returnType DataType,
 		var err error
 		switch f := s.(type) {
 		case IfForm:
-			c, err = compileIfForm(f, returnType, ns, locals, insideLoop)
+			newLocals := map[string]DataType{}
+			for k, v := range locals {
+				newLocals[k] = v
+			}
+			c, err = compileIfForm(f, returnType, ns, newLocals, insideLoop, indent)
 		case AssignmentForm:
-			c, err = compileAssignment(f, ns, locals)
+			c, err = compileAssignment(f, ns, locals, indent)
 		case ReturnForm:
-			c, err = compileReturn(f, returnType, ns, locals)
+			c, err = compileReturn(f, returnType, ns, locals, indent)
 		case BreakForm:
 			if insideLoop {
-				c += "break \n"
+				c += indent + "break; \n"
 			} else {
 				err = msg(f.Line, f.Column, "cannot have break statement outside a loop.")
 			}
 		case ContinueForm:
 			if insideLoop {
-				c += "continue \n"
+				c += indent + "continue; \n"
 			} else {
 				err = msg(f.Line, f.Column, "cannot have continue statement outside a loop.")
 			}
 		case CallForm:
 			c, _, err = compileCallForm(f, ns, locals)
-			c += ";\n"
+			c = indent + c + ";\n"
 		case VarForm:
-			code, err := compileType(f.Type, ns)
-			if err != nil {
-				return "", err
-			}
 			if locals[f.Target].Name != "" {
 				return "", msg(f.Line, f.Column, "Local variable of same name already exists in this scope.")
 			}
-			code += " " + f.Target
-			if f.Value != nil {
-				c, dt, err := compileExpression(f.Value, ns, locals)
+			typeStr := "var"
+			if f.Type.Name != "" {
+				typeStr, err = compileType(f.Type, ns)
 				if err != nil {
 					return "", err
 				}
-				if !isType(dt, f.Type, ns, false) {
+			}
+			valStr := ""
+			var exprType DataType
+			if f.Value != nil {
+				valStr, exprType, err = compileExpression(f.Value, ns, f.Type, locals)
+				if err != nil {
+					return "", err
+				}
+				if f.Type.Name == "" {
+					typeStr, err = compileType(exprType, ns)
+					if err != nil {
+						return "", err
+					}
+				} else if !isType(exprType, f.Type, ns, false) {
 					return "", msg(f.Line, f.Column, "Initial value in var statement is wrong type.")
 				}
-				code += " " + c
 			}
-			code += ";"
+			if valStr == "" {
+				c = indent + typeStr + " " + f.Target + ";\n"
+			} else {
+				c = indent + typeStr + " " + f.Target + " = " + valStr + ";\n"
+			}
+			if f.Type.Name == "" {
+				locals[f.Target] = exprType
+			} else {
+				locals[f.Target] = f.Type
+			}
 		}
 		if err != nil {
 			return "", err
@@ -360,7 +568,7 @@ func compileBody(statements []Statement, returnType DataType,
 	return code, nil
 }
 
-func compileAssignment(f AssignmentForm, ns *Namespace, locals map[string]DataType) (string, error) {
+func compileAssignment(f AssignmentForm, ns *Namespace, locals map[string]DataType, indent string) (string, error) {
 	var code string
 	var dt DataType
 	if f.Target.Namespace == "" {
@@ -371,22 +579,23 @@ func compileAssignment(f AssignmentForm, ns *Namespace, locals map[string]DataTy
 		if code == "" {
 			return "", msg(f.Line, f.Column, "Assignment to non-existent variable.")
 		}
+	} else {
+		code = f.Target.Name
 	}
 	code += " = "
-	c, exprType, err := compileExpression(f.Value, ns, locals)
+	exprStr, exprType, err := compileExpression(f.Value, ns, dt, locals)
 	if err != nil {
 		return "", err
 	}
 	if !isType(exprType, dt, ns, false) {
 		return "", msg(f.Line, f.Column, "Assignment value is wrong type.")
 	}
-	code += c + ";"
-	return code, nil
+	return indent + code + exprStr + ";\n", nil
 }
 
-func compileReturn(f ReturnForm, returnType DataType, ns *Namespace, locals map[string]DataType) (string, error) {
-	code := "return "
-	c, exprType, err := compileExpression(f.Value, ns, locals)
+func compileReturn(f ReturnForm, returnType DataType, ns *Namespace, locals map[string]DataType, indent string) (string, error) {
+	code := indent + "return "
+	c, exprType, err := compileExpression(f.Value, ns, returnType, locals)
 	if err != nil {
 		return "", err
 	}
@@ -397,8 +606,8 @@ func compileReturn(f ReturnForm, returnType DataType, ns *Namespace, locals map[
 	return code, nil
 }
 
-func compileFunc(f FuncDef, ns *Namespace) (string, error) {
-	code := "public static "
+func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
+	code := indent + "public static "
 	if f.ReturnType.Name == "" {
 		code += "void "
 	} else {
@@ -409,28 +618,29 @@ func compileFunc(f FuncDef, ns *Namespace) (string, error) {
 		code += c + " "
 	}
 	code += f.Name + "("
-	var locals map[string]DataType
-	for i, param := range f.Params {
-		locals[param.Name] = param.Type
-		c, err := compileType(param.Type, ns)
+	locals := map[string]DataType{}
+	for i, paramName := range f.ParamNames {
+		paramType := f.ParamTypes[i]
+		locals[paramName] = paramType
+		c, err := compileType(paramType, ns)
 		if err != nil {
 			return "", err
 		}
-		code += param.Name + " " + c
-		if i != len(f.Params)-1 {
+		code += paramName + " " + c
+		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
 	}
 	code += ") {\n"
-	body, err := compileBody(f.Body, f.ReturnType, ns, locals, false, f.ReturnType.Name != "")
+	body, err := compileBody(f.Body, f.ReturnType, ns, locals, false, f.ReturnType.Name != "", indent+"\t")
 	if err != nil {
 		return "", err
 	}
-	code += body + "}\n"
-	return "", nil
+	code += body + indent + "}\n"
+	return code, nil
 }
 
-func compileMethod(f MethodDef, class DataType, ns *Namespace) (string, error) {
+func compileMethod(f MethodDef, class DataType, ns *Namespace, indent string) (string, error) {
 	code := "public "
 	if f.ReturnType.Name == "" {
 		code += "void "
@@ -443,51 +653,53 @@ func compileMethod(f MethodDef, class DataType, ns *Namespace) (string, error) {
 	}
 	code += f.Name + "("
 	locals := map[string]DataType{"this": class}
-	for i, param := range f.Params {
-		locals[param.Name] = param.Type
-		c, err := compileType(param.Type, ns)
+	for i, paramName := range f.ParamNames {
+		paramType := f.ParamTypes[i]
+		locals[paramName] = paramType
+		c, err := compileType(paramType, ns)
 		if err != nil {
 			return "", err
 		}
-		code += param.Name + " " + c
-		if i != len(f.Params)-1 {
+		code += paramName + " " + c
+		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
 	}
 	code += ") {\n"
-	body, err := compileBody(f.Body, f.ReturnType, ns, locals, false, f.ReturnType.Name != "")
+	body, err := compileBody(f.Body, f.ReturnType, ns, locals, false, f.ReturnType.Name != "", indent+"\t")
 	if err != nil {
 		return "", err
 	}
 	code += body + "}\n"
-	return "", nil
+	return code, nil
 }
 
-func compileConstructor(f ConstructorDef, class DataType, ns *Namespace) (string, error) {
+func compileConstructor(f ConstructorDef, class DataType, ns *Namespace, indent string) (string, error) {
 	code := "public " + class.Name + "("
 	locals := map[string]DataType{"this": class}
-	for i, param := range f.Params {
-		locals[param.Name] = param.Type
-		c, err := compileType(param.Type, ns)
+	for i, paramName := range f.ParamNames {
+		paramType := f.ParamTypes[i]
+		locals[paramName] = paramType
+		c, err := compileType(paramType, ns)
 		if err != nil {
 			return "", err
 		}
-		code += param.Name + " " + c
-		if i != len(f.Params)-1 {
+		code += paramName + " " + c
+		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
 	}
 	code += ") {\n"
-	body, err := compileBody(f.Body, class, ns, locals, false, false)
+	body, err := compileBody(f.Body, class, ns, locals, false, false, indent+"\t")
 	if err != nil {
 		return "", err
 	}
 	code += body + "}\n"
-	return "", nil
+	return code, nil
 }
 
-func compileField(f FieldDef, ns *Namespace) (string, error) {
-	var code string
+func compileField(f FieldDef, ns *Namespace, indent string) (string, error) {
+	code := indent
 	switch f.AccessLevel {
 	case PublicAccess:
 		code = "public "
@@ -504,12 +716,12 @@ func compileField(f FieldDef, ns *Namespace) (string, error) {
 	return code, nil
 }
 
-func compileProperty(p PropertyDef, ns *Namespace) (string, error) {
+func compileProperty(p PropertyDef, ns *Namespace, indent string) (string, error) {
 	// todo
 	return "", nil
 }
 
-func compileClass(f ClassDef, ns *Namespace) (string, error) {
+func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
 	var code string
 	switch f.AccessLevel {
 	case PublicAccess:
@@ -543,28 +755,28 @@ func compileClass(f ClassDef, ns *Namespace) (string, error) {
 	}
 	code += " {"
 	for _, fieldDef := range f.Fields {
-		c, err := compileField(fieldDef, ns)
+		c, err := compileField(fieldDef, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
 	}
 	for _, propertyDef := range f.Properties {
-		c, err := compileProperty(propertyDef, ns)
+		c, err := compileProperty(propertyDef, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
 	}
 	for _, constructorDef := range f.Constructors {
-		c, err := compileConstructor(constructorDef, f.Type, ns)
+		c, err := compileConstructor(constructorDef, f.Type, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
 	}
 	for _, methodDef := range f.Methods {
-		c, err := compileMethod(methodDef, f.Type, ns)
+		c, err := compileMethod(methodDef, f.Type, ns, "\t")
 		if err != nil {
 			return "", err
 		}
@@ -599,28 +811,28 @@ func compileStruct(f StructDef, ns *Namespace) (string, error) {
 	}
 	code += " {"
 	for _, fieldDef := range f.Fields {
-		c, err := compileField(fieldDef, ns)
+		c, err := compileField(fieldDef, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
 	}
 	for _, propertyDef := range f.Properties {
-		c, err := compileProperty(propertyDef, ns)
+		c, err := compileProperty(propertyDef, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
 	}
 	for _, constructorDef := range f.Constructors {
-		c, err := compileConstructor(constructorDef, f.Type, ns)
+		c, err := compileConstructor(constructorDef, f.Type, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
 	}
 	for _, methodDef := range f.Methods {
-		c, err := compileMethod(methodDef, f.Type, ns)
+		c, err := compileMethod(methodDef, f.Type, ns, "\t")
 		if err != nil {
 			return "", err
 		}

@@ -13,7 +13,7 @@ func compileCallForm(op CallForm, namespace *Namespace, locals map[string]DataTy
 	operandTypes := make([]DataType, len(op.Args))
 	for i, expr := range op.Args {
 		var err error
-		operandCode[i], operandTypes[i], err = compileExpression(expr, namespace, locals)
+		operandCode[i], operandTypes[i], err = compileExpression(expr, namespace, DataType{}, locals)
 		if err != nil {
 			return "", DataType{}, err
 		}
