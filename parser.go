@@ -137,17 +137,12 @@ func parseClass(parens ParenList, annotations []AnnotationForm) (ClassDef, error
 	if err != nil {
 		return ClassDef{}, err
 	}
-	var parent DataType
-	if len(structDef.Interfaces) > 0 {
-		parent = structDef.Interfaces[0]
-	}
 	return ClassDef{
 		Line:         structDef.Line,
 		Column:       structDef.Column,
 		Type:         structDef.Type,
 		AccessLevel:  structDef.AccessLevel,
-		Parent:       parent,
-		Interfaces:   structDef.Interfaces[1:],
+		Supertypes:   structDef.Interfaces,
 		Fields:       structDef.Fields,
 		Methods:      structDef.Methods,
 		Constructors: structDef.Constructors,
@@ -170,6 +165,7 @@ func parseStruct(parens ParenList, annotations []AnnotationForm, isClass bool) (
 		return StructDef{}, errors.New(strings.Title(structOrClass) + " must have a name: line " + itoa(parens.Line))
 	}
 	idx := 1
+	// parse -priv or -prot flag (if found)
 	if atomChain, ok := elems[idx].(AtomChain); ok {
 		if sigil, ok := atomChain.Atoms[0].(SigilAtom); ok {
 			if sigil.Content == "-" {
@@ -187,11 +183,11 @@ func parseStruct(parens ParenList, annotations []AnnotationForm, isClass bool) (
 			}
 		}
 	}
-	DataType, err := parseDataType(elems[idx])
+	dataType, err := parseDataType(elems[idx])
 	if err != nil {
 		return StructDef{}, errors.New(strings.Title(structOrClass) + " has invalid name: " + err.Error())
 	}
-	structDef.Type = DataType
+	structDef.Type = dataType
 	idx++
 	if len(elems) < idx {
 		return structDef, nil
@@ -203,11 +199,11 @@ func parseStruct(parens ParenList, annotations []AnnotationForm, isClass bool) (
 				if len(elems) < idx {
 					break
 				}
-				DataType, err := parseDataType(elems[idx])
+				dt, err := parseDataType(elems[idx])
 				if err != nil {
 					break
 				}
-				structDef.Interfaces = append(structDef.Interfaces, DataType)
+				structDef.Interfaces = append(structDef.Interfaces, dt)
 				idx++
 			}
 			if len(structDef.Interfaces) == 0 {
@@ -243,28 +239,28 @@ func parseStruct(parens ParenList, annotations []AnnotationForm, isClass bool) (
 			case "f":
 				field, err := parseField(atom, annotations)
 				if err != nil {
-					return StructDef{}, nil
+					return StructDef{}, err
 				}
 				structDef.Fields = append(structDef.Fields, field)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "m":
 				methodDef, err := parseMethod(atom, annotations)
 				if err != nil {
-					return StructDef{}, nil
+					return StructDef{}, err
 				}
 				structDef.Methods = append(structDef.Methods, methodDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "p":
 				property, err := parseProperty(atom, annotations)
 				if err != nil {
-					return StructDef{}, nil
+					return StructDef{}, err
 				}
 				structDef.Properties = append(structDef.Properties, property)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "constructor":
 				constructor, err := parseConstructor(atom, annotations)
 				if err != nil {
-					return StructDef{}, nil
+					return StructDef{}, err
 				}
 				structDef.Constructors = append(structDef.Constructors, constructor)
 				annotations = []AnnotationForm{} // reset to empty slice
@@ -415,9 +411,9 @@ func parseExpression(atom Atom) (Expression, error) {
 	switch atom := atom.(type) {
 	case NumberAtom:
 		expr = ParsedNumberAtom{
-			Value:  atom.Content,
-			Line:   atom.Line,
-			Column: atom.Column,
+			IntegerPart: atom.Content,
+			Line:        atom.Line,
+			Column:      atom.Column,
 		}
 	case StringAtom:
 		expr = atom
@@ -429,10 +425,10 @@ func parseExpression(atom Atom) (Expression, error) {
 		}
 		// optional leading -
 		idx := 0
-		numStr := ""
+		integerPart := ""
 		if sigil, ok := elems[0].(SigilAtom); ok {
 			if sigil.Content == "-" {
-				numStr += "-"
+				integerPart += "-"
 				idx++
 				if len(elems) < 2 {
 					return nil, errors.New("Invalid expression (unexpected sigil): " + spew.Sdump(atom))
@@ -443,16 +439,14 @@ func parseExpression(atom Atom) (Expression, error) {
 		}
 		// expecting number
 		if num, ok := elems[idx].(NumberAtom); ok {
-			numStr += num.Content
+			integerPart += num.Content
 			idx++
 		} else {
 			return nil, errors.New("Invalid expression: " + spew.Sdump(atom))
 		}
-		if len(elems) >= idx {
+		fractionalPart := ""
+		if idx < len(elems) {
 			// optional dot followed by number
-			if len(elems) != idx+1 {
-				return nil, errors.New("Invalid expression: " + spew.Sdump(atom))
-			}
 			if sigil, ok := elems[idx].(SigilAtom); ok {
 				if sigil.Content != "." {
 					return nil, errors.New("Invalid expression (unexpected sigil): " + spew.Sdump(atom))
@@ -460,16 +454,25 @@ func parseExpression(atom Atom) (Expression, error) {
 			} else {
 				return nil, errors.New("Invalid expression (expected .): " + spew.Sdump(elems[idx]))
 			}
-			if num, ok := elems[idx+1].(NumberAtom); ok {
-				numStr += num.Content
+			idx++
+			if idx >= len(elems) {
+				return nil, errors.New("Invalid number literal: expecting fractional part after decimal point: " + spew.Sdump(elems[idx]))
+			}
+			if num, ok := elems[idx].(NumberAtom); ok {
+				fractionalPart = num.Content
 			} else {
 				return nil, errors.New("Invalid expression (expected number): " + spew.Sdump(elems[idx]))
 			}
+			idx++
+		}
+		if idx < len(elems) {
+			return nil, errors.New("Invalid number literal (unexpected atoms): " + spew.Sdump(elems[idx]))
 		}
 		return ParsedNumberAtom{
-			Value:  numStr,
-			Line:   atom.Line,
-			Column: atom.Column,
+			IntegerPart:    integerPart,
+			FractionalPart: fractionalPart,
+			Line:           atom.Line,
+			Column:         atom.Column,
 		}, nil
 	case ParenList:
 		atoms := atom.Atoms
@@ -509,11 +512,11 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 	}
 	atoms := parens.Atoms
 	if len(atoms) < 2 {
-		return MethodDef{}, errors.New("Invalid function definition: " + spew.Sdump(parens))
+		return MethodDef{}, errors.New("Invalid method definition: " + spew.Sdump(parens))
 	}
 	if symbol, ok := atoms[1].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
-			return MethodDef{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(symbol))
+			return MethodDef{}, errors.New("Invalid method name (cannot begin with uppercase): " + spew.Sdump(symbol))
 		}
 		methodDef.Name = symbol.Content
 	}
@@ -527,7 +530,7 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 		idx++
 	}
 	if len(atoms) <= idx {
-		return MethodDef{}, errors.New("Incomplete function definition: " + spew.Sdump(parens))
+		return MethodDef{}, errors.New("Incomplete method definition: " + spew.Sdump(parens))
 	}
 	// params
 	if sigil, ok := atoms[idx].(SigilAtom); ok {
@@ -537,7 +540,7 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 		idx++
 		paramNames := []string{}
 		paramTypes := []DataType{}
-		for len(atoms) < idx+2 {
+		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
@@ -762,10 +765,8 @@ func parseBody(atoms []Atom) ([]Statement, error) {
 				return nil, err
 			}
 			stmts = append(stmts, stmt)
-			if n > 0 {
-				i += n
-				continue
-			}
+			i += n
+			continue
 		}
 		// might be a call with a qualified name
 		expr, err := parseExpression(atom)

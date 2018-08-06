@@ -4,6 +4,15 @@
     (as i (add 5 3))
     )
 
+(class Foo
+    (f alice I 24)
+
+    (m bar F : a I b I
+        (var asdf I 2)
+        (return 3.0)
+    )
+)
+
 // (class HeadingTargetRandomizerSystem : ComponentSystem ISomeInterface
 //     (@ Inject)
 //     (f -priv group Group)

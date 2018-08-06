@@ -4,7 +4,6 @@ import (
 	"errors"
 	"math"
 	"strconv"
-	"strings"
 )
 
 func compile(topDefs TopDefs) (string, error) {
@@ -29,7 +28,15 @@ func compile(topDefs TopDefs) (string, error) {
 		}
 		code += c
 	}
-	code += "}"
+	code += "}\n\n"
+
+	for _, classDef := range topDefs.Classes {
+		c, err := compileClass(classDef, ns, "")
+		if err != nil {
+			return "", err
+		}
+		code += c
+	}
 
 	return code, nil
 }
@@ -96,7 +103,8 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 		}
 	}
 
-	for _, class := range topDefs.Classes {
+	parentExpectedIdxs := []int{}
+	for i, class := range topDefs.Classes {
 		if _, ok := fullNames[class.Type.Name]; ok {
 			return nil, msg(class.Line, class.Column, "Class name already used.")
 		}
@@ -104,11 +112,14 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 		fullNames[class.Type.Name] = fullName
 
 		classInterfaces := []*InterfaceInfo{}
-		for _, dt := range class.Interfaces {
+		for j, dt := range class.Supertypes {
 			interfaceFullName := dt.Name + "/" + dt.Namespace
 			interfaceInfo, ok := interfaces[interfaceFullName]
 			if !ok {
-				return nil, msg(class.Line, class.Column, "Struct implements unknown interface.")
+				if j == 0 {
+					parentExpectedIdxs = append(parentExpectedIdxs, i)
+				}
+				return nil, msg(class.Line, class.Column, "Class implements unknown interface.")
 			}
 			classInterfaces = append(classInterfaces, interfaceInfo)
 		}
@@ -119,15 +130,15 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 			Interfaces: classInterfaces,
 		}
 	}
-	for _, class := range topDefs.Classes {
-		if class.Parent.Name == "" {
-			continue
-		}
-		fullName := class.Type.Name + "/" + topDefs.Namespace
+	// check that parents exist having already constructed list of all classes
+	for _, idx := range parentExpectedIdxs {
+		classDef := topDefs.Classes[idx]
+		fullName := classDef.Type.Name + "/" + topDefs.Namespace
 		classInfo := classes[fullName]
-		parentInfo := classes[class.Parent.Name+"/"+class.Parent.Namespace]
+		firstSuperType := classDef.Supertypes[0]
+		parentInfo := classes[firstSuperType.Name+"/"+firstSuperType.Namespace]
 		if parentInfo == nil {
-			return nil, msg(class.Line, class.Column, "Parent class does not exist.")
+			return nil, msg(classDef.Line, classDef.Column, "Parent class does not exist.")
 		}
 		classInfo.Parent = parentInfo
 	}
@@ -306,64 +317,78 @@ func compileExpression(expr Expression, ns *Namespace, expectedType DataType, lo
 		}
 	case ParsedNumberAtom:
 		if expectedType.Name == "" {
-			if strings.Contains(expr.Value, ".") {
-				code = "(double) " + expr.Value
-				dt = DoubleType
-			} else {
-				val, err := strconv.Atoi(expr.Value)
+			if expr.FractionalPart == "" {
+				val, err := strconv.Atoi(expr.IntegerPart)
 				if err != nil {
 					return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int number literal.")
 				}
 				if val > math.MaxInt32 || val < math.MinInt32 {
 					return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int number literal but magnitude is too great.")
 				}
-				code = "(int) " + expr.Value
+				code = expr.IntegerPart
 				dt = IntType
+			} else {
+				code = expr.IntegerPart + "." + expr.FractionalPart
+				dt = DoubleType
 			}
 		} else if expectedType.Name == IntType.Name {
-			val, err := strconv.Atoi(expr.Value)
+			if expr.FractionalPart != "" {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int literal, but got floating-point.")
+			}
+			val, err := strconv.Atoi(expr.IntegerPart)
 			if err != nil {
 				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int number literal.")
 			}
 			if val > math.MaxInt32 || val < math.MinInt32 {
 				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Int number literal but magnitude is too great.")
 			}
-			code = "(int) " + expr.Value
+			code = expr.IntegerPart
 			dt = IntType
 		} else if expectedType.Name == LongIntType.Name {
-			_, err := strconv.Atoi(expr.Value)
+			if expr.FractionalPart != "" {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting II literal, but got floating-point.")
+			}
+			_, err := strconv.Atoi(expr.IntegerPart)
 			if err != nil {
 				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting II number literal, but value is not integer or out of range.")
 			}
-			code = "(long) " + expr.Value
+			code = "(long) " + expr.IntegerPart
 			dt = LongIntType
 		} else if expectedType.Name == FloatType.Name {
-			// todo check within float range
-			code = "(float) " + expr.Value
+			if expr.FractionalPart == "" {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Float literal, but got integer.")
+			}
+			code = "(float) " + expr.IntegerPart + "." + expr.FractionalPart
 			dt = FloatType
 		} else if expectedType.Name == DoubleType.Name {
 			// todo check within double range
-			code = "(double) " + expr.Value
+			code = "(double) " + expr.IntegerPart + "." + expr.FractionalPart
 			dt = DoubleType
 		} else if expectedType.Name == ByteType.Name {
-			val, err := strconv.Atoi(expr.Value)
+			if expr.FractionalPart != "" {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Byte literal, but got floating-point.")
+			}
+			val, err := strconv.Atoi(expr.IntegerPart)
 			if err != nil {
 				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Byte number literal.")
 			}
 			if val > math.MaxUint8 || val < 0 {
 				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting Byte number literal but value is out of range.")
 			}
-			code = "(byte) " + expr.Value
+			code = "(byte) " + expr.IntegerPart
 			dt = ByteType
 		} else if expectedType.Name == SignedByteType.Name {
-			val, err := strconv.Atoi(expr.Value)
+			if expr.FractionalPart != "" {
+				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting SByte literal, but got floating-point.")
+			}
+			val, err := strconv.Atoi(expr.IntegerPart)
 			if err != nil {
 				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting SByte number literal.")
 			}
 			if val > math.MaxInt8 || val < math.MinInt8 {
 				return "", DataType{}, msg(expr.Line, expr.Column, "Expecting SByte number literal but value is out of range.")
 			}
-			code = "(sbyte) " + expr.Value
+			code = "(sbyte) " + expr.IntegerPart
 			dt = SignedByteType
 		} else {
 			return "", DataType{}, msg(expr.Line, expr.Column, "Non-number type given as expected type for a number literal.")
@@ -397,7 +422,7 @@ func compileGlobals(globals []GlobalDef, ns *Namespace) (string, error) {
 			code += " = " + c + ";\n"
 		}
 	}
-	code += "}\n"
+	code += "}\n\n"
 	return code, nil
 }
 
@@ -641,7 +666,7 @@ func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
 }
 
 func compileMethod(f MethodDef, class DataType, ns *Namespace, indent string) (string, error) {
-	code := "public "
+	code := indent + "public "
 	if f.ReturnType.Name == "" {
 		code += "void "
 	} else {
@@ -670,7 +695,7 @@ func compileMethod(f MethodDef, class DataType, ns *Namespace, indent string) (s
 	if err != nil {
 		return "", err
 	}
-	code += body + "}\n"
+	code += body + "\n" + indent + "}\n"
 	return code, nil
 }
 
@@ -702,17 +727,25 @@ func compileField(f FieldDef, ns *Namespace, indent string) (string, error) {
 	code := indent
 	switch f.AccessLevel {
 	case PublicAccess:
-		code = "public "
+		code += "public "
 	case PrivateAccess:
-		code = "private "
+		code += "private "
 	case ProtectedAccess:
-		code = "protected "
+		code += "protected "
 	}
 	typeStr, err := compileType(f.Type, ns)
 	if err != nil {
 		return "", err
 	}
-	code += typeStr + " " + f.Name + ";"
+	if f.Value != nil {
+		exprStr, _, err := compileExpression(f.Value, ns, f.Type, nil)
+		if err != nil {
+			return "", err
+		}
+		code += typeStr + " " + f.Name + " = " + exprStr + ";"
+	} else {
+		code += typeStr + " " + f.Name + ";"
+	}
 	return code, nil
 }
 
@@ -731,35 +764,30 @@ func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
 	case ProtectedAccess:
 		code = "protected "
 	}
-	code += f.Type.Name + " "
-	if f.Parent.Name != "" {
-		typeStr, err := compileType(f.Parent, ns)
-		if err != nil {
-			return "", err
-		}
-		code += ": " + typeStr + " "
+	code += f.Type.Name
+	if len(f.Supertypes) > 0 {
+		code += " : "
 	}
-	for i, inter := range f.Interfaces {
-		typeStr, err := compileType(inter, ns)
+	for i, super := range f.Supertypes {
+		typeStr, err := compileType(super, ns)
 		if err != nil {
 			return "", err
-		}
-		if i == 0 {
-			if f.Parent.Name == "" {
-				code += ": "
-			}
-		} else {
-			code += ", "
 		}
 		code += typeStr
+		if i != len(f.Supertypes)-1 {
+			code += ", "
+		}
 	}
-	code += " {"
+	code += " {\n"
 	for _, fieldDef := range f.Fields {
 		c, err := compileField(fieldDef, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
+	}
+	if len(f.Fields) > 0 {
+		code += "\n"
 	}
 	for _, propertyDef := range f.Properties {
 		c, err := compileProperty(propertyDef, ns, "\t")
@@ -775,12 +803,15 @@ func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
 		}
 		code += c + "\n"
 	}
-	for _, methodDef := range f.Methods {
+	for i, methodDef := range f.Methods {
 		c, err := compileMethod(methodDef, f.Type, ns, "\t")
 		if err != nil {
 			return "", err
 		}
-		code += c + "\n"
+		code += c
+		if i < len(f.Methods)-1 {
+			code += "\n"
+		}
 	}
 	code += "}"
 	return code, nil

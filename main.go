@@ -169,8 +169,7 @@ type ClassDef struct {
 	Column       int
 	Type         DataType
 	AccessLevel  AccessLevel
-	Parent       DataType
-	Interfaces   []DataType
+	Supertypes   []DataType
 	Fields       []FieldDef
 	Methods      []MethodDef
 	Constructors []ConstructorDef
@@ -477,9 +476,10 @@ type NumberAtom struct {
 }
 
 type ParsedNumberAtom struct {
-	Value  string
-	Line   int
-	Column int
+	IntegerPart    string
+	FractionalPart string
+	Line           int
+	Column         int
 }
 
 type StringAtom struct {
