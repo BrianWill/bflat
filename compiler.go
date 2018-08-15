@@ -42,11 +42,12 @@ func compile(topDefs TopDefs) (string, error) {
 }
 
 func createNamespace(topDefs TopDefs) (*Namespace, error) {
+	namespace := topDefs.Namespace.Name
 	interfaces := map[string]*InterfaceInfo{}
 	classes := map[string]*ClassInfo{}
 	structs := map[string]*StructInfo{}
 	globals := map[string]*GlobalInfo{}
-	funcs := map[string][]*FuncInfo{}
+	funcs := map[string][]*CallableInfo{}
 
 	fullNames := map[string]string{} // unqualified names -> fully qualified names
 	// todo populate classes and fullNames with imports
@@ -55,23 +56,25 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 	// 		foo/bar
 	//		foo/ack
 
-	for _, interfaceDef := range topDefs.Interfaces {
+	for i, interfaceDef := range topDefs.Interfaces {
 		if _, ok := fullNames[interfaceDef.Type.Name]; ok {
 			return nil, msg(interfaceDef.Line, interfaceDef.Column, "Interface name already used.")
 		}
-		fullName := interfaceDef.Type.Name + "/" + topDefs.Namespace
+		topDefs.Interfaces[i].Type.Namespace = namespace
+		fullName := interfaceDef.Type.Name + "/" + namespace
 		fullNames[interfaceDef.Type.Name] = fullName
 		interfaces[fullName] = &InterfaceInfo{
 			Name:      interfaceDef.Type.Name,
-			Namespace: topDefs.Namespace,
+			Namespace: namespace,
 		}
 	}
 
-	for _, structDef := range topDefs.Structs {
+	for i, structDef := range topDefs.Structs {
 		if _, ok := fullNames[structDef.Type.Name]; ok {
 			return nil, msg(structDef.Line, structDef.Column, "Struct name already used.")
 		}
-		fullName := structDef.Type.Name + "/" + topDefs.Namespace
+		topDefs.Structs[i].Type.Namespace = namespace
+		fullName := structDef.Type.Name + "/" + namespace
 		fullNames[structDef.Type.Name] = fullName
 
 		structInterfaces := []*InterfaceInfo{}
@@ -86,7 +89,7 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 
 		structs[fullName] = &StructInfo{
 			Name:       structDef.Type.Name,
-			Namespace:  topDefs.Namespace,
+			Namespace:  namespace,
 			Interfaces: structInterfaces,
 		}
 	}
@@ -95,11 +98,11 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 		if _, ok := fullNames[globalInfo.Type.Name]; ok {
 			return nil, msg(globalInfo.Line, globalInfo.Column, "Global name already used.")
 		}
-		fullName := globalInfo.Type.Name + "/" + topDefs.Namespace
+		fullName := globalInfo.Type.Name + "/" + namespace
 		fullNames[globalInfo.Type.Name] = fullName
 		globals[fullName] = &GlobalInfo{
 			Name:      globalInfo.Type.Name,
-			Namespace: topDefs.Namespace,
+			Namespace: namespace,
 		}
 	}
 
@@ -108,7 +111,8 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 		if _, ok := fullNames[class.Type.Name]; ok {
 			return nil, msg(class.Line, class.Column, "Class name already used.")
 		}
-		fullName := class.Type.Name + "/" + topDefs.Namespace
+		topDefs.Classes[i].Type.Namespace = namespace
+		fullName := class.Type.Name + "/" + namespace
 		fullNames[class.Type.Name] = fullName
 
 		classInterfaces := []*InterfaceInfo{}
@@ -118,6 +122,7 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 			if !ok {
 				if j == 0 {
 					parentExpectedIdxs = append(parentExpectedIdxs, i)
+					continue
 				}
 				return nil, msg(class.Line, class.Column, "Class implements unknown interface.")
 			}
@@ -126,17 +131,20 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 
 		classes[fullName] = &ClassInfo{
 			Name:       class.Type.Name,
-			Namespace:  topDefs.Namespace,
+			Namespace:  namespace,
 			Interfaces: classInterfaces,
 		}
 	}
 	// check that parents exist having already constructed list of all classes
 	for _, idx := range parentExpectedIdxs {
 		classDef := topDefs.Classes[idx]
-		fullName := classDef.Type.Name + "/" + topDefs.Namespace
-		classInfo := classes[fullName]
+		classInfo := classes[classDef.Type.Name+"/"+namespace]
 		firstSuperType := classDef.Supertypes[0]
-		parentInfo := classes[firstSuperType.Name+"/"+firstSuperType.Namespace]
+		parentFullName := firstSuperType.Name + "/" + firstSuperType.Namespace
+		if firstSuperType.Namespace == "" {
+			parentFullName += namespace
+		}
+		parentInfo := classes[parentFullName]
 		if parentInfo == nil {
 			return nil, msg(classDef.Line, classDef.Column, "Parent class does not exist.")
 		}
@@ -144,12 +152,11 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 	}
 
 	for _, fn := range topDefs.Funcs {
-		fullName := fn.Name + "/" + topDefs.Namespace
+		fullName := fn.Name + "/" + namespace
 		fullNames[fn.Name] = fullName
 		funcs[fullName] = append(funcs[fullName],
-			&FuncInfo{
-				Name:       fn.Name,
-				Namespace:  topDefs.Namespace,
+			&CallableInfo{
+				IsMethod:   false,
 				ParamNames: fn.ParamNames,
 				ParamTypes: fn.ParamTypes,
 				ReturnType: fn.ReturnType,
@@ -158,11 +165,13 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 	}
 
 	return &Namespace{
+		Name:       namespace,
 		Classes:    classes,
 		Structs:    structs,
 		Interfaces: interfaces,
 		Globals:    globals,
 		Funcs:      funcs,
+		FullNames:  fullNames,
 	}, nil
 }
 
@@ -174,12 +183,89 @@ func fullName(name string, namespace string, ns *Namespace) string {
 }
 
 func (dt DataType) fullName(ns *Namespace) string {
+	if dt.Namespace == "" {
+		switch dt.Name {
+		case "I":
+			fallthrough
+		case "II":
+			fallthrough
+		case "F":
+			fallthrough
+		case "FF":
+			fallthrough
+		case "Byte":
+			fallthrough
+		case "SByte":
+			return dt.Name
+		}
+	}
 	return fullName(dt.Name, dt.Namespace, ns)
 }
 
 func isType(child DataType, parent DataType, ns *Namespace, exact bool) bool {
-	if parent.Name == "Any" && parent.Namespace == "" {
-		return true
+	// child is subtype of builtin type
+	if parent.Namespace == "" {
+		if parent.Name == "Any" {
+			return true
+		}
+		if child.Namespace != "" {
+			return false
+		}
+		switch parent.Name {
+		case "I":
+			switch child.Name {
+			case "I":
+				fallthrough
+			case "Byte":
+				fallthrough
+			case "SByte":
+				return true
+			}
+		case "II":
+			switch child.Name {
+			case "II":
+				fallthrough
+			case "I":
+				fallthrough
+			case "Byte":
+				fallthrough
+			case "SByte":
+				return true
+			}
+		case "F":
+			switch child.Name {
+			case "F":
+				fallthrough
+			case "Byte":
+				fallthrough
+			case "SByte":
+				return true
+			}
+		case "FF":
+			switch child.Name {
+			case "FF":
+				fallthrough
+			case "F":
+				fallthrough
+			case "I":
+				fallthrough
+			case "Byte":
+				fallthrough
+			case "SByte":
+				return true
+			}
+		case "Byte":
+			switch child.Name {
+			case "Byte":
+				return true
+			}
+		case "SByte":
+			switch child.Name {
+			case "SByte":
+				return true
+			}
+		}
+		return false
 	}
 
 	childFull := child.fullName(ns)
@@ -227,7 +313,7 @@ func isType(child DataType, parent DataType, ns *Namespace, exact bool) bool {
 	// 		return false
 	// 	}
 	// }
-	return true
+	return false
 }
 
 func (si *StructInfo) isImplementor(ii *InterfaceInfo) bool {
@@ -281,7 +367,22 @@ func isValidType(dt DataType, ns *Namespace) bool {
 		return true
 	}
 
-	// todo: account for built-in types
+	if dt.Namespace == "" {
+		switch dt.Name {
+		case "I":
+			fallthrough
+		case "II":
+			fallthrough
+		case "F":
+			fallthrough
+		case "FF":
+			fallthrough
+		case "Byte":
+			fallthrough
+		case "SByte":
+			return true
+		}
+	}
 
 	return false
 }
@@ -292,15 +393,8 @@ func getGlobal(name string, nsStr string, ns *Namespace) (DataType, string) {
 	return DataType{}, ""
 }
 
-// returns signatures and csharp fully-qualified names
-func getSignatures(name string, nsStr string, ns *Namespace) ([]Signature, []string) {
-
-	return nil, nil
-}
-
-func compileExpression(expr Expression, ns *Namespace, expectedType DataType, locals map[string]DataType) (string, DataType, error) {
-	var dt DataType
-	var code string
+func compileExpression(expr Expression, ns *Namespace, expectedType DataType,
+	locals map[string]DataType) (code string, dt DataType, err error) {
 	switch expr := expr.(type) {
 	case VarExpression:
 		dt, code = getGlobal(expr.Name, expr.Namespace, ns)
@@ -328,7 +422,7 @@ func compileExpression(expr Expression, ns *Namespace, expectedType DataType, lo
 				code = expr.IntegerPart
 				dt = IntType
 			} else {
-				code = expr.IntegerPart + "." + expr.FractionalPart
+				code = "(double) " + expr.IntegerPart + "." + expr.FractionalPart
 				dt = DoubleType
 			}
 		} else if expectedType.Name == IntType.Name {
@@ -394,13 +488,20 @@ func compileExpression(expr Expression, ns *Namespace, expectedType DataType, lo
 			return "", DataType{}, msg(expr.Line, expr.Column, "Non-number type given as expected type for a number literal.")
 		}
 	case StringAtom:
-		return "\"" + expr.Content[1:len(expr.Content)-1] + "\"", StrType, nil
+		code = "\"" + expr.Content[1:len(expr.Content)-1] + "\""
+		dt = StrType
 	case CallForm:
-		return compileCallForm(expr, ns, locals)
+		code, dt, err = compileCallForm(expr, ns, expectedType, locals)
+		if err != nil {
+			return "", DataType{}, err
+		}
 	case DataType:
 		return "", DataType{}, errors.New("Expected expression, got DataType: line " + itoa(expr.Line) + " column " + itoa(expr.Column))
 	}
-	return code, dt, nil
+	if expectedType.Name != "" && !isType(dt, expectedType, ns, false) {
+		return "", DataType{}, msg(expr.GetLine(), expr.GetColumn(), "Expression has wrong type.")
+	}
+	return
 }
 
 func compileGlobals(globals []GlobalDef, ns *Namespace) (string, error) {
@@ -463,6 +564,7 @@ func compileType(dt DataType, ns *Namespace) (string, error) {
 					c += ">"
 				}
 			}
+			return c, nil
 		}
 	}
 	return "", nil
@@ -545,7 +647,7 @@ func compileBody(statements []Statement, returnType DataType,
 				err = msg(f.Line, f.Column, "cannot have continue statement outside a loop.")
 			}
 		case CallForm:
-			c, _, err = compileCallForm(f, ns, locals)
+			c, _, err = compileCallForm(f, ns, DataType{}, locals)
 			c = indent + c + ";\n"
 		case VarForm:
 			if locals[f.Target].Name != "" {
@@ -627,7 +729,7 @@ func compileReturn(f ReturnForm, returnType DataType, ns *Namespace, locals map[
 	if !isType(exprType, returnType, ns, false) {
 		return "", msg(f.Line, f.Column, "Return value is wrong type.")
 	}
-	code += c + ";"
+	code += c + ";\n"
 	return code, nil
 }
 
@@ -695,7 +797,7 @@ func compileMethod(f MethodDef, class DataType, ns *Namespace, indent string) (s
 	if err != nil {
 		return "", err
 	}
-	code += body + "\n" + indent + "}\n"
+	code += body + indent + "}\n"
 	return code, nil
 }
 
@@ -813,7 +915,7 @@ func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
 			code += "\n"
 		}
 	}
-	code += "}"
+	code += "}\n\n"
 	return code, nil
 }
 

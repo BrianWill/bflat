@@ -153,6 +153,13 @@ type GlobalDef struct {
 	Annotations []AnnotationForm
 }
 
+type NamespaceDef struct {
+	Line        int
+	Column      int
+	Name        string
+	Annotations []AnnotationForm
+}
+
 type FuncDef struct {
 	Line        int
 	Column      int
@@ -201,21 +208,17 @@ type GlobalInfo struct {
 	Namespace string
 }
 
-type FuncInfo struct {
-	Name       string
-	Namespace  string
+type CallableInfo struct {
+	IsMethod   bool
 	ParamNames []string
 	ParamTypes []DataType
 	ReturnType DataType
 }
 
-type MethodInfo struct {
-	Name      string
-	Namespace string
-}
-
 type Expression interface {
 	Expression()
+	GetLine() int
+	GetColumn() int
 }
 
 type CallForm struct {
@@ -238,6 +241,97 @@ func (a ParsedNumberAtom) Expression() {}
 func (a StringAtom) Expression()       {}
 func (a CallForm) Expression()         {}
 func (a DataType) Expression()         {}
+
+func (a DataType) GetLine() int {
+	return a.Line
+}
+func (a DataType) GetColumn() int {
+	return a.Column
+}
+
+func (a CallForm) GetLine() int {
+	return a.Line
+}
+func (a CallForm) GetColumn() int {
+	return a.Column
+}
+
+func (a StringAtom) GetLine() int {
+	return a.Line
+}
+func (a StringAtom) GetColumn() int {
+	return a.Column
+}
+
+func (a ParsedNumberAtom) GetLine() int {
+	return a.Line
+}
+func (a ParsedNumberAtom) GetColumn() int {
+	return a.Column
+}
+
+func (a VarExpression) GetLine() int {
+	return a.Line
+}
+func (a VarExpression) GetColumn() int {
+	return a.Column
+}
+
+func (a ParenList) GetLine() int {
+	return a.Line
+}
+func (a ParenList) GetColumn() int {
+	return a.Column
+}
+
+func (a SquareList) GetLine() int {
+	return a.Line
+}
+func (a SquareList) GetColumn() int {
+	return a.Column
+}
+
+func (a CurlyList) GetLine() int {
+	return a.Line
+}
+func (a CurlyList) GetColumn() int {
+	return a.Column
+}
+
+func (a AngleList) GetLine() int {
+	return a.Line
+}
+func (a AngleList) GetColumn() int {
+	return a.Column
+}
+
+func (a Symbol) GetLine() int {
+	return a.Line
+}
+func (a Symbol) GetColumn() int {
+	return a.Column
+}
+
+func (a SigilAtom) GetLine() int {
+	return a.Line
+}
+func (a SigilAtom) GetColumn() int {
+	return a.Column
+}
+
+func (a AtomChain) GetLine() int {
+	return a.Line
+}
+func (a AtomChain) GetColumn() int {
+	return a.Column
+}
+
+func (a NumberAtom) GetLine() int {
+	return a.Line
+}
+func (a NumberAtom) GetColumn() int {
+	return a.Column
+}
 
 func (a CallForm) Statement()       {}
 func (a AssignmentForm) Statement() {}
@@ -366,29 +460,16 @@ type StructDef struct {
 }
 
 type InterfaceDef struct {
-	Line             int
-	Column           int
-	Type             DataType
-	AccessLevel      AccessLevel
-	Interfaces       []DataType
-	MethodSignatures []MethodSignature
-	Annotations      []AnnotationForm
-}
-
-type MethodSignature struct {
-	Line        int
-	Column      int
-	Name        string
-	Params      []DataType
-	ReturnType  DataType
-	Annotations []AnnotationForm
-}
-
-type Signature struct {
-	Name       string
-	IsMethod   bool
-	ParamTypes []DataType
-	ReturnType DataType
+	Line              int
+	Column            int
+	Type              DataType
+	AccessLevel       AccessLevel
+	ParentInterfaces  []DataType
+	MethodNames       []string
+	MethodParams      [][]DataType
+	MethodReturnTypes []DataType
+	MethodAnnotations [][]AnnotationForm
+	Annotations       []AnnotationForm
 }
 
 type MethodDef struct {
@@ -423,6 +504,8 @@ type PropertyDef struct {
 
 type Atom interface {
 	Atom()
+	GetLine() int
+	GetColumn() int
 }
 
 type AccessLevel int
@@ -505,7 +588,7 @@ func (a StringAtom) Atom() {}
 func (a SigilAtom) Atom()  {}
 
 type TopDefs struct {
-	Namespace  string
+	Namespace  NamespaceDef
 	Classes    []ClassDef
 	Structs    []StructDef
 	Interfaces []InterfaceDef
@@ -521,8 +604,8 @@ type Namespace struct {
 	Classes    map[string]*ClassInfo
 	Structs    map[string]*StructInfo
 	Interfaces map[string]*InterfaceInfo
-	Funcs      map[string][]*FuncInfo
-	Methods    map[string][]*MethodInfo
+	Funcs      map[string][]*CallableInfo
+	Methods    map[string][]*CallableInfo
 	Globals    map[string]*GlobalInfo
 	FullNames  map[string]string // unqualifieid name -> fully qualified name
 }
@@ -557,6 +640,26 @@ var ByteType = DataType{
 
 var SignedByteType = DataType{
 	Name: "SByte",
+}
+
+var OperatorSymbols = map[string]string{
+	"add":  " + ",
+	"sub":  " - ",
+	"mul":  " * ",
+	"div":  " / ",
+	"mod":  " % ",
+	"and":  " && ",
+	"or":   " || ",
+	"band": " & ",
+	"bor":  " | ",
+	"bxor": " ^ ",
+	"cat":  " + ",
+	"eq":   " == ",
+	"neq":  " != ",
+	"gt":   " > ",
+	"lt":   " < ",
+	"gte":  " >= ",
+	"lte":  " <= ",
 }
 
 func main() {

@@ -43,38 +43,47 @@ func parse(readerData []Atom) (TopDefs, error) {
 			case "class":
 				class, err := parseClass(atom, annotations)
 				if err != nil {
-					spew.Dump(err)
-					return TopDefs{}, nil
+					return TopDefs{}, err
 				}
 				topDefs.Classes = append(topDefs.Classes, class)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "struct":
 				structDef, err := parseStruct(atom, annotations, false)
 				if err != nil {
-					return TopDefs{}, nil
+					return TopDefs{}, err
 				}
 				topDefs.Structs = append(topDefs.Structs, structDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "func":
 				funcDef, err := parseFunc(atom, annotations)
 				if err != nil {
-					return TopDefs{}, nil
+					return TopDefs{}, err
 				}
 				topDefs.Funcs = append(topDefs.Funcs, funcDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "interface":
 				interfaceDef, err := parseInterface(atom, annotations)
 				if err != nil {
-					return TopDefs{}, nil
+					return TopDefs{}, err
 				}
 				topDefs.Interfaces = append(topDefs.Interfaces, interfaceDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "global":
 				global, err := parseGlobal(atom, annotations)
 				if err != nil {
-					return TopDefs{}, nil
+					return TopDefs{}, err
 				}
 				topDefs.Globals = append(topDefs.Globals, global)
+				annotations = []AnnotationForm{} // reset to empty slice
+			case "ns":
+				if topDefs.Namespace.Name != "" {
+					return TopDefs{}, errors.New("Cannot have more than one namespace declaration in a file: " + spew.Sdump(atom))
+				}
+				ns, err := parseNamespaceDef(atom, annotations)
+				if err != nil {
+					return TopDefs{}, err
+				}
+				topDefs.Namespace = ns
 				annotations = []AnnotationForm{} // reset to empty slice
 			default:
 				return TopDefs{}, errors.New("Invalid top-level atom: " + spew.Sdump(atom))
@@ -189,14 +198,14 @@ func parseStruct(parens ParenList, annotations []AnnotationForm, isClass bool) (
 	}
 	structDef.Type = dataType
 	idx++
-	if len(elems) < idx {
+	if idx >= len(elems) {
 		return structDef, nil
 	}
 	if sigil, ok := elems[idx].(SigilAtom); ok {
 		if sigil.Content == ":" {
 			idx++
 			for {
-				if len(elems) < idx {
+				if idx >= len(elems) {
 					break
 				}
 				dt, err := parseDataType(elems[idx])
@@ -364,6 +373,26 @@ func parseDataType(atom Atom) (DataType, error) {
 		return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 	}
 	return dataType, nil
+}
+
+func parseNamespaceDef(parens ParenList, annotations []AnnotationForm) (NamespaceDef, error) {
+	atoms := parens.Atoms
+	if len(atoms) != 2 {
+		return NamespaceDef{}, errors.New("Invalid namespace form. Too many atoms. " + spew.Sdump(atoms))
+	}
+	symbol, ok := atoms[1].(Symbol)
+	if !ok {
+		return NamespaceDef{}, errors.New("Invalid namespace form. Expecting symbol. " + spew.Sdump(atoms))
+	}
+	if symbol.Content == strings.Title(symbol.Content) {
+		return NamespaceDef{}, errors.New("Invalid namespace form: name cannot start with uppercase letter. " + spew.Sdump(atoms))
+	}
+	return NamespaceDef{
+		Name:        symbol.Content,
+		Line:        symbol.Line,
+		Column:      symbol.Column,
+		Annotations: annotations,
+	}, nil
 }
 
 // expects / sigil followed by one or more symbols separated by dots
@@ -689,7 +718,7 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 		idx++
 		paramNames := []string{}
 		paramTypes := []DataType{}
-		for len(atoms) < idx+2 {
+		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
@@ -967,17 +996,24 @@ func parseVar(atoms []Atom, line int, column int) (VarForm, error) {
 		Target: symbol.Content,
 	}
 	valIdx := 2
-	var err error
 	if len(atoms) == 4 {
-		varForm.Type, err = parseDataType(atoms[2])
-		if err != nil {
-			return VarForm{}, err
-		}
 		valIdx = 3
 	}
-	varForm.Value, err = parseExpression(atoms[valIdx])
-	if err != nil {
-		return VarForm{}, err
+	var errType error
+	var errVal error
+	varForm.Type, errType = parseDataType(atoms[2])
+	varForm.Value, errVal = parseExpression(atoms[valIdx])
+	if len(atoms) == 3 {
+		if errType != nil && errVal != nil {
+			return VarForm{}, msg(atoms[2].GetLine(), atoms[2].GetColumn(), "Var form expecting expression or type.")
+		}
+	} else {
+		if errType != nil {
+			return VarForm{}, errType
+		}
+		if errVal != nil {
+			return VarForm{}, errVal
+		}
 	}
 	return varForm, nil
 }
@@ -1168,55 +1204,56 @@ func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDe
 		if !ok {
 			return InterfaceDef{}, errors.New("Invalid atom in interface method signature. " + spew.Sdump(parens))
 		}
-		methodSig, err := parseMethodSignature(parens)
+		paramTypes, returnType, name, err := parseMethodSignature(parens)
 		if err != nil {
 			return InterfaceDef{}, err
 		}
-		interfaceDef.MethodSignatures = append(interfaceDef.MethodSignatures, methodSig)
+		interfaceDef.MethodNames = append(interfaceDef.MethodNames, name)
+		interfaceDef.MethodParams = append(interfaceDef.MethodParams, paramTypes)
+		interfaceDef.MethodReturnTypes = append(interfaceDef.MethodReturnTypes, returnType)
 	}
 	return interfaceDef, nil
 }
 
-func parseMethodSignature(parens ParenList) (MethodSignature, error) {
-	methodSignature := MethodSignature{
-		Line:   parens.Line,
-		Column: parens.Column,
-	}
+func parseMethodSignature(parens ParenList) ([]DataType, DataType, string, error) {
+	var name string
+	var returnType DataType
 	atoms := parens.Atoms
 	if len(atoms) < 2 {
-		return MethodSignature{}, errors.New("Invalid function definition: " + spew.Sdump(parens))
+		return nil, DataType{}, "", errors.New("Invalid function definition: " + spew.Sdump(parens))
 	}
 	if symbol, ok := atoms[1].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
-			return MethodSignature{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(symbol))
+			return nil, DataType{}, "", errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(symbol))
 		}
-		methodSignature.Name = symbol.Content
+		name = symbol.Content
 	}
 	if len(atoms) < 3 {
-		return methodSignature, nil
+		return nil, DataType{}, "", nil
 	}
 	idx := 2
-	DataType, err := parseDataType(atoms[idx])
+	dataType, err := parseDataType(atoms[idx])
 	if err == nil {
-		methodSignature.ReturnType = DataType
+		returnType = dataType
 		idx++
 	}
 	if len(atoms) <= idx {
-		return MethodSignature{}, errors.New("Incomplete function definition: " + spew.Sdump(parens))
+		return nil, DataType{}, "", errors.New("Incomplete function definition: " + spew.Sdump(parens))
 	}
 	// params
+	paramTypes := []DataType{}
 	if sigil, ok := atoms[idx].(SigilAtom); ok {
 		if sigil.Content != ":" {
-			return MethodSignature{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
+			return nil, DataType{}, "", errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
 		}
 		idx++
 		for _, atom := range atoms[idx:] {
-			DataType, err := parseDataType(atom)
+			dataType, err := parseDataType(atom)
 			if err != nil {
-				return MethodSignature{}, errors.New("Invalid parameter type: " + spew.Sdump(atom))
+				return nil, DataType{}, "", errors.New("Invalid parameter type: " + spew.Sdump(atom))
 			}
-			methodSignature.Params = append(methodSignature.Params, DataType)
+			paramTypes = append(paramTypes, dataType)
 		}
 	}
-	return methodSignature, nil
+	return paramTypes, returnType, name, nil
 }

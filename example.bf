@@ -1,17 +1,28 @@
 
+(ns myspace)
+
 (func main
     (var i 3)
     (as i (add 5 3))
-    )
+    (as i (kevin 2)))
+
+(func kevin I : a I
+    (return (add a 4)))
+
 
 (class Foo
     (f alice I 24)
 
-    (m bar F : a I b I
-        (var asdf I 2)
-        (return 3.0)
-    )
+    (m bar F : a I c I
+        (var b Bar)
+        (return 3.0)))
+
+(class Monkey : Bar)
+
+(class Bar : Foo
+    (f zelda F 35.0)
 )
+
 
 // (class HeadingTargetRandomizerSystem : ComponentSystem ISomeInterface
 //     (@ Inject)

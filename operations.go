@@ -8,27 +8,137 @@ func isInteger(dt DataType) bool {
 	return dt.Name == "I" || dt.Name == "Byte" || dt.Name == "II" || dt.Name == "SByte"
 }
 
-func compileCallForm(op CallForm, namespace *Namespace, locals map[string]DataType) (string, DataType, error) {
+func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
+	locals map[string]DataType) (string, DataType, error) {
+	returnType := expectedType
+	expectedArgType := expectedType
+	multiOperand := true
+	switch op.Name {
+	case "add", "sub", "mul", "div":
+		if !isNumber(expectedType) {
+			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+		}
+	case "lt", "lte", "gt", "gte":
+		if !isNumber(expectedType) {
+			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+		}
+		expectedArgType = DoubleType // todo: actually need type which is supertype of all numbers (Long is not subtype of Double)
+	case "inc", "dec":
+		multiOperand = false
+		if !isInteger(expectedType) {
+			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+		}
+	case "mod", "band", "bor", "bxor":
+		if !isInteger(expectedType) {
+			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+		}
+	case "bnot":
+		if !isInteger(expectedType) {
+			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+		}
+		multiOperand = false
+	case "eq", "neq":
+		expectedArgType = DataType{}
+		returnType = BoolType
+	case "not":
+		multiOperand = false
+		expectedArgType = BoolType
+	case "or", "and":
+		expectedArgType = BoolType
+	case "cat":
+		expectedArgType = StrType
+	default:
+		return "", DataType{}, msg(op.Line, op.Column, "Unknown operation or call to unknown function or method.")
+	}
+	if multiOperand {
+		if len(op.Args) < 2 {
+			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation requires at least two operands")
+		}
+	} else {
+		if len(op.Args) != 1 {
+			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation requires one operand")
+		}
+	}
 	operandCode := make([]string, len(op.Args))
 	operandTypes := make([]DataType, len(op.Args))
 	for i, expr := range op.Args {
 		var err error
-		operandCode[i], operandTypes[i], err = compileExpression(expr, namespace, DataType{}, locals)
+		operandCode[i], operandTypes[i], err = compileExpression(expr, ns, expectedArgType, locals)
 		if err != nil {
 			return "", DataType{}, err
 		}
 	}
 	code := "("
+	switch op.Name {
+	case "add", "sub", "mul", "div", "mod", "and", "or", "band", "bor", "bxor", "cat":
+		operatorSymbol := OperatorSymbols[op.Name]
+		for i := range op.Args {
+			code += operandCode[i]
+			if i < len(op.Args)-1 {
+				code += operatorSymbol
+			}
+		}
+	case "inc":
+		code += operandCode[0] + " + 1"
+	case "dec":
+		code += operandCode[0] + " - 1"
+	case "eq", "neq":
+		operatorSymbol := OperatorSymbols[op.Name]
+		for i := 0; i < len(op.Args)-1; i++ {
+			if !isType(operandTypes[i+1], operandTypes[0], ns, true) {
+				return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation has mismatched operand types")
+			}
+			if i > 0 {
+				code += " && "
+			}
+			code += operandCode[i] + operatorSymbol + operandCode[i+1]
+		}
+	case "not":
+		code += "!" + operandCode[0]
+	case "lt", "gt", "gte", "lte":
+		operatorSymbol := OperatorSymbols[op.Name]
+		for i := 0; i < len(op.Args)-1; i++ {
+			if i > 0 {
+				code += " && "
+			}
+			// todo: should use variables to store the compiled expressions because otherwise we're potentially repeating complex expressions
+			code += operandCode[i] + operatorSymbol + operandCode[i+1]
+		}
+	case "bnot":
+		code += "^" + operandCode[1]
+	}
+	code += ")"
+	return code, returnType, nil
+
+}
+
+func compileCallForm(op CallForm, ns *Namespace, expectedType DataType,
+	locals map[string]DataType) (string, DataType, error) {
+	fullName := fullName(op.Name, op.Namespace, ns)
+	if fullName == "" {
+		return compileOperation(op, ns, expectedType, locals)
+	}
+
+	argCode := make([]string, len(op.Args))
+	argTypes := make([]DataType, len(op.Args))
+	for i, expr := range op.Args {
+		var err error
+		argCode[i], argTypes[i], err = compileExpression(expr, ns, DataType{}, locals)
+		if err != nil {
+			return "", DataType{}, err
+		}
+	}
+	code := ""
 	var returnType DataType
-	sigs, names := getSignatures(op.Name, op.Namespace, namespace)
+	sigs := append(ns.Funcs[fullName], ns.Methods[fullName]...)
 	if len(sigs) > 0 {
 		matching := []int{}
 		// find sigs which match args
 	Loop:
 		for i, sig := range sigs {
-			if len(operandTypes) == len(sig.ParamTypes) {
+			if len(argTypes) == len(sig.ParamTypes) {
 				for j, paramType := range sig.ParamTypes {
-					if !isType(operandTypes[j], paramType, namespace, false) {
+					if !isType(argTypes[j], paramType, ns, false) {
 						continue Loop
 					}
 				}
@@ -41,14 +151,20 @@ func compileCallForm(op CallForm, namespace *Namespace, locals map[string]DataTy
 			sig := sigs[matching[0]]
 			isMethod := sig.IsMethod
 			if isMethod {
-				code += operandCode[0] + "."
+				code += argCode[0] + "."
+			} else {
+				if op.Namespace == "" {
+					code += ns.Name + "." + FuncsClass + "."
+				} else {
+					code += op.Namespace + "." + FuncsClass + "."
+				}
 			}
-			code += names[matching[0]] + "("
-			for i, arg := range operandCode {
+			code += op.Name + "("
+			for i, arg := range argCode {
 				if isMethod && i == 0 {
 					continue
 				}
-				if i == len(operandCode)-1 {
+				if i == len(argCode)-1 {
 					code += arg + ")"
 				} else {
 					code += arg + ","
@@ -56,314 +172,6 @@ func compileCallForm(op CallForm, namespace *Namespace, locals map[string]DataTy
 			}
 			returnType = sig.ReturnType
 		}
-	} else {
-		if op.Namespace != "" {
-			return "", DataType{}, msg(op.Line, op.Column, "Invalid method or function call.")
-		}
-		switch op.Name {
-		case "add":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "'add' operations requires at least two operands.")
-			}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "'add' operation has non-number operand")
-			}
-			for i := range op.Args {
-				if !isType(operandTypes[i], t, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "'add' operation has operand whose type differs from the others")
-				}
-				code += operandCode[i]
-				if i < len(op.Args)-1 {
-					code += " + "
-				}
-			}
-			returnType = t
-		case "sub":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "'sub' operation requires at least two operands")
-			}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "'sub' operation has non-number operand")
-			}
-			for i := range op.Args {
-				if !isType(operandTypes[i], t, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "'sub' operation has operand whose type differs from the others")
-				}
-				code += operandCode[i]
-				if i < len(op.Args)-1 {
-					code += " - "
-				}
-			}
-			returnType = t
-		case "mul":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "mul operation requires at least two operands")
-			}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "mul operation has non-number operand")
-			}
-			for i := range op.Args {
-				if !isType(operandTypes[i], t, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "mul operation has non-number operand")
-				}
-				code += operandCode[i]
-				if i < len(op.Args)-1 {
-					code += " * "
-				}
-			}
-			returnType = t
-		case "div":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "div operation requires at least two operands")
-			}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "div operation has non-number operand")
-			}
-			for i := range op.Args {
-				if !isType(operandTypes[i], t, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "div operation has non-number operand")
-				}
-				code += operandCode[i]
-				if i < len(op.Args)-1 {
-					code += " / "
-				}
-			}
-			returnType = t
-		case "inc":
-			if len(op.Args) != 1 {
-				return "", DataType{}, msg(op.Line, op.Column, "inc operation requires one operand.")
-			}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "inc operation has non-number operand")
-			}
-			code += operandCode[0] + " + 1"
-			returnType = t
-		case "dec":
-			if len(op.Args) != 1 {
-				return "", DataType{}, msg(op.Line, op.Column, "dec operation requires one operand.")
-			}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "dec operation has non-number operand")
-			}
-			code += operandCode[0] + " - 1"
-			returnType = t
-		case "mod":
-			if len(op.Args) != 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "mod operation requires two operands")
-			}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "mod operation's first operand must be a number")
-			}
-			if !isType(operandTypes[1], t, namespace, true) {
-				return "", DataType{}, msg(op.Line, op.Column, "mod operation's second operand must be same type as first")
-			}
-			for i := range op.Args {
-				code += operandCode[i]
-				if i < len(op.Args)-1 {
-					code += " % "
-				}
-			}
-			returnType = t
-		case "eq":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "eq operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Bool"}
-			for i := 0; i < len(op.Args)-1; i++ {
-				if !isType(operandTypes[i], operandTypes[0], namespace, true) ||
-					!isType(operandTypes[i+1], operandTypes[0], namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "eq operation has mismatched operand types")
-				}
-				if i > 0 {
-					code += " && "
-				}
-				code += operandCode[i] + " == " + operandCode[i+1]
-			}
-		case "neq":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "neq operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Bool"}
-			for i := 0; i < len(op.Args)-1; i++ {
-				if !isType(operandTypes[i], operandTypes[0], namespace, true) ||
-					!isType(operandTypes[i+1], operandTypes[0], namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "neq operation has mismatched operand types")
-				}
-				if i > 0 {
-					code += " && "
-				}
-				code += operandCode[i] + " != " + operandCode[i+1]
-			}
-		case "not":
-			if len(op.Args) != 1 {
-				return "", DataType{}, msg(op.Line, op.Column, "not operation requires one operand")
-			}
-			returnType = DataType{Name: "Bool"}
-			if !isType(operandTypes[0], returnType, namespace, true) {
-				return "", DataType{}, msg(op.Line, op.Column, "not operation has a non-bool operand")
-			}
-			code += "!" + operandCode[0]
-		case "lt":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "lt operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Bool"}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "lt operation has non-number operand")
-			}
-			for i := 0; i < len(op.Args)-1; i++ {
-				if !isType(operandTypes[i], t, namespace, true) ||
-					!isType(operandTypes[i+1], t, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "lt operation has non-number operand")
-				}
-				if i > 0 {
-					code += " && "
-				}
-				code += operandCode[i] + " < " + operandCode[i+1]
-			}
-		case "gt":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "gt operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Bool"}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "lt operation has non-number operand")
-			}
-			for i := 0; i < len(op.Args)-1; i++ {
-				if !isType(operandTypes[i], t, namespace, true) ||
-					!isType(operandTypes[i+1], t, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "gt operation has non-number operand")
-				}
-				if i > 0 {
-					code += " && "
-				}
-				code += operandCode[i] + " > " + operandCode[i+1]
-			}
-		case "lte":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "lte operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Bool"}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "lt operation has non-number operand")
-			}
-			for i := 0; i < len(op.Args)-1; i++ {
-				if !isType(operandTypes[i], t, namespace, true) ||
-					!isType(operandTypes[i+1], t, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "lte operation has non-number operand")
-				}
-				if i > 0 {
-					code += " && "
-				}
-				code += operandCode[i] + " <= " + operandCode[i+1]
-
-			}
-		case "gte":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "gte operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Bool"}
-			t := operandTypes[0]
-			if !isNumber(t) {
-				return "", DataType{}, msg(op.Line, op.Column, "lt operation has non-number operand")
-			}
-			for i := 0; i < len(op.Args)-1; i++ {
-				if !isType(operandTypes[i], t, namespace, true) ||
-					!isType(operandTypes[i+1], t, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "gte operation has non-number operand")
-				}
-				if i > 0 {
-					code += " && "
-				}
-				code += operandCode[i] + " >= " + operandCode[i+1]
-			}
-		case "or":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "or operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Bool"}
-			for i := range op.Args {
-				if !isType(operandTypes[i], returnType, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "or operation has non-boolean operand")
-				}
-				code += operandCode[i]
-				if i < len(op.Args)-1 {
-					code += " || "
-				}
-			}
-		case "and":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "and operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Bool"}
-			for i := range op.Args {
-				if !isType(operandTypes[i], returnType, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "and operation has non-boolean operand")
-				}
-				code += operandCode[i]
-				if i < len(op.Args)-1 {
-					code += " && "
-				}
-			}
-		case "band":
-			if len(op.Args) != 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "'band' operation requires two operands")
-			}
-			if !isNumber(operandTypes[0]) || !isNumber(operandTypes[1]) {
-				return "", DataType{}, msg(op.Line, op.Column, "'band' operation requires two number operands")
-			}
-			code += operandCode[0] + " & " + operandCode[1]
-		case "bor":
-			if len(op.Args) != 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "'bor' operation requires two operands")
-			}
-			if !isNumber(operandTypes[0]) || !isNumber(operandTypes[1]) {
-				return "", DataType{}, msg(op.Line, op.Column, "'bor' operation requires two number operands")
-			}
-			code += operandCode[0] + " | " + operandCode[1]
-		case "bxor":
-			if len(op.Args) != 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "'bxor' operation requires two operands")
-			}
-			if !isNumber(operandTypes[0]) || !isNumber(operandTypes[1]) {
-				return "", DataType{}, msg(op.Line, op.Column, "'bxor' operation requires two number operands")
-			}
-			code += operandCode[0] + " ^ " + operandCode[1]
-		case "bnot":
-			if len(op.Args) != 1 {
-				return "", DataType{}, msg(op.Line, op.Column, "'bnot' operation requires one operand")
-			}
-			if !isNumber(operandTypes[0]) {
-				return "", DataType{}, msg(op.Line, op.Column, "'bnot' operation requires one number operand")
-			}
-			code += "^" + operandCode[1]
-		case "cat":
-			if len(op.Args) < 2 {
-				return "", DataType{}, msg(op.Line, op.Column, "concat operation requires at least two operands")
-			}
-			returnType = DataType{Name: "Str"}
-			for i := range op.Args {
-				if !isType(operandTypes[i], returnType, namespace, true) {
-					return "", DataType{}, msg(op.Line, op.Column, "concat operation has non-string operand")
-				}
-				code += operandCode[i]
-				if i < len(op.Args)-1 {
-					code += " + "
-				}
-			}
-		}
 	}
-
-	code += ")"
 	return code, returnType, nil
 }
