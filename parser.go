@@ -503,14 +503,15 @@ func parseExpression(atom Atom) (Expression, error) {
 			Line:           atom.Line,
 			Column:         atom.Column,
 		}, nil
+	case SquareList:
+		expr, err = parseIndexing(atom, atom.Line, atom.Column)
+		if err != nil {
+			return nil, err
+		}
 	case ParenList:
 		atoms := atom.Atoms
 		if len(atoms) == 0 {
 			return nil, errors.New("Invalid expression (empty parens): " + spew.Sdump(atom))
-		}
-		varExpr, err := parseVarExpression(atoms[0])
-		if err != nil {
-			return nil, errors.New("Invalid expression (expecting name): " + spew.Sdump(atom))
 		}
 		args := make([]Expression, len(atoms)-1)
 		for i, a := range atoms[1:] {
@@ -520,12 +521,26 @@ func parseExpression(atom Atom) (Expression, error) {
 			}
 			args[i] = expr
 		}
-		expr = CallForm{
-			Line:      atom.Line,
-			Column:    atom.Column,
-			Name:      varExpr.Name,
-			Namespace: varExpr.Namespace,
-			Args:      args,
+		varExpr, err := parseVarExpression(atoms[0])
+		if err != nil {
+			dt, err := parseDataType(atoms[0])
+			if err != nil {
+				return nil, errors.New("Invalid expression (expecting name or type): " + spew.Sdump(atom))
+			}
+			expr = TypeCallForm{
+				Line:   atom.Line,
+				Column: atom.Column,
+				Type:   dt,
+				Args:   args,
+			}
+		} else {
+			expr = CallForm{
+				Line:      atom.Line,
+				Column:    atom.Column,
+				Name:      varExpr.Name,
+				Namespace: varExpr.Namespace,
+				Args:      args,
+			}
 		}
 	default:
 		return nil, errors.New("Invalid expression: " + spew.Sdump(atom))
@@ -657,7 +672,7 @@ func parseConstructor(parens ParenList, annotations []AnnotationForm) (Construct
 		idx++
 		paramNames := []string{}
 		paramTypes := []DataType{}
-		for len(atoms) < idx+2 {
+		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
@@ -870,29 +885,64 @@ Loop:
 	return ifForm, n, nil
 }
 
+func parseIndexing(square SquareList, line int, column int) (IndexingForm, error) {
+	atoms := square.Atoms
+	if len(atoms) < 1 {
+		return IndexingForm{}, msg(line, column, "Indexing expression cannot be empty square brackets.")
+	}
+	args := make([]Expression, len(atoms))
+	for i, a := range atoms {
+		expr, err := parseExpression(a)
+		if err != nil {
+			return IndexingForm{}, err
+		}
+		args[i] = expr
+	}
+	if len(atoms) == 1 {
+		args = append(args, VarExpression{
+			Line:      square.Line,
+			Column:    square.Column,
+			Name:      thisWord,
+			Namespace: "",
+		})
+	}
+	return IndexingForm{
+		Line:   square.Line,
+		Column: square.Column,
+		Args:   args,
+	}, nil
+}
+
 func parseAssignment(atoms []Atom, line int, column int) (AssignmentForm, error) {
 	if len(atoms) != 3 {
 		return AssignmentForm{}, errors.New("Assignment statement has wrong number of elements: " + spew.Sdump(atoms))
 	}
-	varExpr, err := parseVarExpression(atoms[1])
+	var target Target
+	var err error
+	targetAtom := atoms[1]
+	if square, ok := targetAtom.(SquareList); ok {
+		target, err = parseIndexing(square, line, column)
+	} else {
+		target, err = parseVarExpression(targetAtom)
+	}
 	if err != nil {
 		return AssignmentForm{}, err
 	}
-	assignmentForm := AssignmentForm{
+	value, err := parseExpression(atoms[2])
+	if err != nil {
+		return AssignmentForm{}, err
+	}
+	return AssignmentForm{
 		Line:   line,
 		Column: column,
-		Target: varExpr,
-	}
-	assignmentForm.Value, err = parseExpression(atoms[2])
-	if err != nil {
-		return AssignmentForm{}, err
-	}
-	return assignmentForm, nil
+		Target: target,
+		Value:  value,
+	}, nil
 }
 
 func parseReturn(atoms []Atom, line int, column int) (ReturnForm, error) {
 	if len(atoms) != 2 {
-		return ReturnForm{}, errors.New("Return statement has wrong number of elements: " + spew.Sdump(atoms))
+		return ReturnForm{}, msg(line, column, "Return statement has wrong number of elements.")
 	}
 	expr, err := parseExpression(atoms[1])
 	if err != nil {
@@ -1204,13 +1254,24 @@ func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDe
 		if !ok {
 			return InterfaceDef{}, errors.New("Invalid atom in interface method signature. " + spew.Sdump(parens))
 		}
-		paramTypes, returnType, name, err := parseMethodSignature(parens)
-		if err != nil {
-			return InterfaceDef{}, err
+		if symbol, ok := parens.Atoms[0].(Symbol); ok {
+			switch symbol.Content {
+			case "m":
+				paramTypes, returnType, name, err := parseMethodSignature(parens)
+				if err != nil {
+					return InterfaceDef{}, err
+				}
+				interfaceDef.MethodNames = append(interfaceDef.MethodNames, name)
+				interfaceDef.MethodParams = append(interfaceDef.MethodParams, paramTypes)
+				interfaceDef.MethodReturnTypes = append(interfaceDef.MethodReturnTypes, returnType)
+			case "f":
+				// todo: fields
+			case "p":
+				// todo: properties
+			}
+		} else {
+			return InterfaceDef{}, errors.New("Expecting symbol at start of parenlist in interface. " + spew.Sdump(parens))
 		}
-		interfaceDef.MethodNames = append(interfaceDef.MethodNames, name)
-		interfaceDef.MethodParams = append(interfaceDef.MethodParams, paramTypes)
-		interfaceDef.MethodReturnTypes = append(interfaceDef.MethodReturnTypes, returnType)
 	}
 	return interfaceDef, nil
 }
@@ -1220,11 +1281,11 @@ func parseMethodSignature(parens ParenList) ([]DataType, DataType, string, error
 	var returnType DataType
 	atoms := parens.Atoms
 	if len(atoms) < 2 {
-		return nil, DataType{}, "", errors.New("Invalid function definition: " + spew.Sdump(parens))
+		return nil, DataType{}, "", errors.New("Invalid method signature: " + spew.Sdump(parens))
 	}
 	if symbol, ok := atoms[1].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
-			return nil, DataType{}, "", errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(symbol))
+			return nil, DataType{}, "", errors.New("Invalid method name (cannot begin with uppercase): " + spew.Sdump(symbol))
 		}
 		name = symbol.Content
 	}
@@ -1238,7 +1299,7 @@ func parseMethodSignature(parens ParenList) ([]DataType, DataType, string, error
 		idx++
 	}
 	if len(atoms) <= idx {
-		return nil, DataType{}, "", errors.New("Incomplete function definition: " + spew.Sdump(parens))
+		return nil, DataType{}, "", errors.New("Incomplete method definition: " + spew.Sdump(parens))
 	}
 	// params
 	paramTypes := []DataType{}

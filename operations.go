@@ -1,15 +1,18 @@
 package main
 
 func isNumber(dt DataType) bool {
-	return dt.Name == "I" || dt.Name == "F" || dt.Name == "Byte" || dt.Name == "II" || dt.Name == "FF"
+	return dt.Name == "I" || dt.Name == "F" || dt.Name == "B" || dt.Name == "SB" || dt.Name == "II" || dt.Name == "FF"
 }
 
 func isInteger(dt DataType) bool {
-	return dt.Name == "I" || dt.Name == "Byte" || dt.Name == "II" || dt.Name == "SByte"
+	return dt.Name == "I" || dt.Name == "B" || dt.Name == "II" || dt.Name == "SB"
 }
 
 func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
 	locals map[string]DataType) (string, DataType, error) {
+	if op.Namespace != "" {
+		return "", DataType{}, msg(op.Line, op.Column, "Call to unknown method or function.")
+	}
 	returnType := expectedType
 	expectedArgType := expectedType
 	multiOperand := true
@@ -48,7 +51,7 @@ func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
 	case "cat":
 		expectedArgType = StrType
 	default:
-		return "", DataType{}, msg(op.Line, op.Column, "Unknown operation or call to unknown function or method.")
+		return "", DataType{}, msg(op.Line, op.Column, "Unknown operator, function, or method.")
 	}
 	if multiOperand {
 		if len(op.Args) < 2 {
@@ -115,7 +118,11 @@ func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
 func compileCallForm(op CallForm, ns *Namespace, expectedType DataType,
 	locals map[string]DataType) (string, DataType, error) {
 	fullName := fullName(op.Name, op.Namespace, ns)
-	if fullName == "" {
+
+	var returnType DataType
+	sigs := append(ns.Funcs[fullName], ns.Methods[fullName]...)
+	matching := []int{}
+	if len(sigs) == 0 {
 		return compileOperation(op, ns, expectedType, locals)
 	}
 
@@ -129,49 +136,150 @@ func compileCallForm(op CallForm, ns *Namespace, expectedType DataType,
 		}
 	}
 	code := ""
-	var returnType DataType
-	sigs := append(ns.Funcs[fullName], ns.Methods[fullName]...)
-	if len(sigs) > 0 {
-		matching := []int{}
-		// find sigs which match args
-	Loop:
-		for i, sig := range sigs {
-			if len(argTypes) == len(sig.ParamTypes) {
-				for j, paramType := range sig.ParamTypes {
-					if !isType(argTypes[j], paramType, ns, false) {
-						continue Loop
-					}
-				}
-				matching = append(matching, i)
-			}
-		}
-		if len(matching) > 1 {
-			return "", DataType{}, msg(op.Line, op.Column, "Call is ambiguous (multiple matching methods or functions).")
-		} else if len(matching) == 1 {
-			sig := sigs[matching[0]]
-			isMethod := sig.IsMethod
-			if isMethod {
-				code += argCode[0] + "."
-			} else {
-				if op.Namespace == "" {
-					code += ns.Name + "." + FuncsClass + "."
-				} else {
-					code += op.Namespace + "." + FuncsClass + "."
+
+	// find sigs which match args
+Loop:
+	for i, sig := range sigs {
+		if len(argTypes) == len(sig.ParamTypes) {
+			for j, paramType := range sig.ParamTypes {
+				if !isType(argTypes[j], paramType, ns, false) {
+					continue Loop
 				}
 			}
-			code += op.Name + "("
-			for i, arg := range argCode {
-				if isMethod && i == 0 {
-					continue
-				}
-				if i == len(argCode)-1 {
-					code += arg + ")"
-				} else {
-					code += arg + ","
-				}
-			}
-			returnType = sig.ReturnType
+			matching = append(matching, i)
 		}
 	}
+
+	switch len(matching) {
+	case 0:
+		return compileOperation(op, ns, expectedType, locals)
+	case 1:
+		sig := sigs[matching[0]]
+		isMethod := sig.IsMethod
+		if isMethod {
+			code += argCode[0] + "."
+		} else {
+			if op.Namespace == "" {
+				code += ns.Name + "." + FuncsClass + "."
+			} else {
+				code += op.Namespace + "." + FuncsClass + "."
+			}
+		}
+		code += op.Name + "("
+		for i, arg := range argCode {
+			if isMethod && i == 0 {
+				continue
+			}
+			if i == len(argCode)-1 {
+				code += arg
+			} else {
+				code += arg + ","
+			}
+		}
+		code += ")"
+		returnType = sig.ReturnType
+	default:
+		return "", DataType{}, msg(op.Line, op.Column, "Call is ambiguous (multiple matching methods or functions).")
+	}
 	return code, returnType, nil
+}
+
+func compileTypeCallForm(op TypeCallForm, ns *Namespace, expectedType DataType,
+	locals map[string]DataType) (code string, returnType DataType, err error) {
+	argCode := make([]string, len(op.Args))
+	argTypes := make([]DataType, len(op.Args))
+	for i, expr := range op.Args {
+		var err error
+		argCode[i], argTypes[i], err = compileExpression(expr, ns, DataType{}, locals)
+		if err != nil {
+			return "", DataType{}, err
+		}
+	}
+	if isZeroType(op.Type) {
+		// should be impossible
+		return "", DataType{}, msg(op.Line, op.Column, "Compiling call form starting with zero type.")
+	} else if isType(op.Type, IntType, ns, true) {
+		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
+			err = msg(op.Line, op.Column, "Invalid cast to I.")
+			return
+		}
+
+	} else if isType(op.Type, LongIntType, ns, true) {
+		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
+			err = msg(op.Line, op.Column, "Invalid cast to II.")
+			return
+		}
+
+	} else if isType(op.Type, FloatType, ns, true) {
+		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
+			err = msg(op.Line, op.Column, "Invalid cast to F.")
+			return
+		}
+
+	} else if isType(op.Type, DoubleType, ns, true) {
+		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
+			err = msg(op.Line, op.Column, "Invalid cast to FF.")
+			return
+		}
+
+	} else if isType(op.Type, ByteType, ns, true) {
+		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
+			err = msg(op.Line, op.Column, "Invalid cast to B.")
+			return
+		}
+
+	} else if isType(op.Type, SignedByteType, ns, true) {
+		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
+			err = msg(op.Line, op.Column, "Invalid cast to SB.")
+			return
+		}
+
+	} else if isType(op.Type, BoolType, ns, true) {
+		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
+			err = msg(op.Line, op.Column, "Invalid cast to Bool.")
+			return
+		}
+
+	} else if isType(op.Type, StrType, ns, true) {
+		if len(op.Args) != 1 {
+			err = msg(op.Line, op.Column, "Invalid cast to Str.")
+			return
+		}
+		// if number, convert to string
+		// if class or struct type, call ToString
+	} else {
+		fullName := ns.FullNames[op.Type.Name]
+		constructorSigs := ns.Constructors[fullName]
+		if len(constructorSigs) > 0 {
+			matching := []int{}
+			// find sigs which match args
+		Loop:
+			for i, sig := range constructorSigs {
+				if len(argTypes) == len(sig.ParamTypes) {
+					for j, paramType := range sig.ParamTypes {
+						if !isType(argTypes[j], paramType, ns, false) {
+							continue Loop
+						}
+					}
+					matching = append(matching, i)
+				}
+			}
+			if len(matching) > 1 {
+				return "", DataType{}, msg(op.Line, op.Column, "Constructor call is ambiguous (multiple matching methods or functions).")
+			} else if len(matching) == 1 {
+				sig := constructorSigs[matching[0]]
+				code += "new " + op.Type.CSName(ns) + "("
+				for i, arg := range argCode {
+					if i == len(argCode)-1 {
+						code += arg
+					} else {
+						code += arg + ","
+					}
+				}
+				code += ")"
+				returnType = sig.ReturnType
+			}
+		}
+	}
+	return
 }

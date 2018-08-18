@@ -9,18 +9,52 @@
 (func kevin I : a I
     (return (add a 4)))
 
-
 (class Foo
     (f alice I 24)
 
     (m bar F : a I c I
-        (var b Bar)
+        (var b Foo (Foo))
+        //(var i I [alice])
+        (as [alice] 9)
+        (var ack [alice])
         (return 3.0)))
 
-(class Monkey : Bar)
+
+(class Monkey : Bar Eater
+
+    (m david
+        (var i 3)
+        (as i 5)
+        (as [zelda] 6.0)
+        (lisa me)
+    )
+)
+
+(interface Eater
+
+    (m david)
+
+)
+
 
 (class Bar : Foo
     (f zelda F 35.0)
+
+    (m lisa
+        (var i 3)
+        (as i 5)
+        (var test Eater)
+    )
+
+    (constructor 
+        (var i 3)
+        (as i 5)
+    )
+
+    (constructor : a Str
+        (var i 3)
+        (as i 5)
+    )
 )
 
 

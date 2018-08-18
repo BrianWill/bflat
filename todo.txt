@@ -2,5 +2,23 @@
 
 
 
+- check for name collisions between namespace qualified names and locals, e.g. foo.Bar and foo (is c# smart about this?)
+
+- account for member access levels
+
+- call inherited methods
+- access inherited fields
 
 
+- properties
+
+
+- importing bflat
+
+- importing csharp
+
+- interfaces
+
+- arrays
+
+- generics

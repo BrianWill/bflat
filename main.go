@@ -16,6 +16,7 @@ type Token struct {
 	Column  int    // first character of a line is in column 1
 }
 
+const thisWord = "me"
 const IndentSpaces = 4
 
 // not including nil, true, false, and the operators
@@ -188,24 +189,36 @@ type ClassInfo struct {
 	Name       string
 	Namespace  string
 	Parent     *ClassInfo
+	Fields     map[string]FieldInfo
 	Interfaces []*InterfaceInfo
 }
 
 type StructInfo struct {
 	Name       string
 	Namespace  string
+	Fields     map[string]FieldInfo
 	Interfaces []*InterfaceInfo
 }
 
 type InterfaceInfo struct {
-	Name      string
-	Namespace string
-	Parents   []*InterfaceInfo
+	Name       string
+	Namespace  string
+	Parents    []*InterfaceInfo
+	Signatures map[string]SignatureInfo
+}
+
+type IsImplementor interface {
+	IsImplementor(*InterfaceInfo) bool
 }
 
 type GlobalInfo struct {
 	Name      string
 	Namespace string
+}
+
+type SignatureInfo struct {
+	ParamTypes []DataType
+	ReturnType DataType
 }
 
 type CallableInfo struct {
@@ -221,12 +234,25 @@ type Expression interface {
 	GetColumn() int
 }
 
+type IndexingForm struct {
+	Line   int
+	Column int
+	Args   []Expression
+}
+
 type CallForm struct {
 	Line      int
 	Column    int
 	Name      string
 	Namespace string
 	Args      []Expression
+}
+
+type TypeCallForm struct {
+	Line   int
+	Column int
+	Type   DataType
+	Args   []Expression
 }
 
 type VarExpression struct {
@@ -239,7 +265,9 @@ type VarExpression struct {
 func (a VarExpression) Expression()    {}
 func (a ParsedNumberAtom) Expression() {}
 func (a StringAtom) Expression()       {}
+func (a IndexingForm) Expression()     {}
 func (a CallForm) Expression()         {}
+func (a TypeCallForm) Expression()     {}
 func (a DataType) Expression()         {}
 
 func (a DataType) GetLine() int {
@@ -249,10 +277,24 @@ func (a DataType) GetColumn() int {
 	return a.Column
 }
 
+func (a IndexingForm) GetLine() int {
+	return a.Line
+}
+func (a IndexingForm) GetColumn() int {
+	return a.Column
+}
+
 func (a CallForm) GetLine() int {
 	return a.Line
 }
 func (a CallForm) GetColumn() int {
+	return a.Column
+}
+
+func (a TypeCallForm) GetLine() int {
+	return a.Line
+}
+func (a TypeCallForm) GetColumn() int {
 	return a.Column
 }
 
@@ -381,12 +423,19 @@ type DataType struct {
 	Namespace  string
 }
 
+type Target interface {
+	Target()
+}
+
 type AssignmentForm struct {
 	Line   int
 	Column int
-	Target VarExpression
+	Target Target
 	Value  Expression
 }
+
+func (a VarExpression) Target() {}
+func (a IndexingForm) Target()  {}
 
 type ReturnForm struct {
 	Line   int
@@ -444,6 +493,12 @@ type FieldDef struct {
 	AccessLevel AccessLevel
 	Annotations []AnnotationForm
 	Value       Expression
+}
+
+type FieldInfo struct {
+	Name        string
+	Type        DataType
+	AccessLevel AccessLevel
 }
 
 type StructDef struct {
@@ -600,14 +655,15 @@ const GlobalsClass = "_Globals"
 const FuncsClass = "_Funcs"
 
 type Namespace struct {
-	Name       string
-	Classes    map[string]*ClassInfo
-	Structs    map[string]*StructInfo
-	Interfaces map[string]*InterfaceInfo
-	Funcs      map[string][]*CallableInfo
-	Methods    map[string][]*CallableInfo
-	Globals    map[string]*GlobalInfo
-	FullNames  map[string]string // unqualifieid name -> fully qualified name
+	Name         string
+	Classes      map[string]*ClassInfo
+	Structs      map[string]*StructInfo
+	Interfaces   map[string]*InterfaceInfo
+	Constructors map[string][]*CallableInfo
+	Funcs        map[string][]*CallableInfo
+	Methods      map[string][]*CallableInfo
+	Globals      map[string]*GlobalInfo
+	FullNames    map[string]string // unqualifieid name -> fully qualified name
 }
 
 var StrType = DataType{
@@ -635,11 +691,11 @@ var DoubleType = DataType{
 }
 
 var ByteType = DataType{
-	Name: "Byte",
+	Name: "B",
 }
 
 var SignedByteType = DataType{
-	Name: "SByte",
+	Name: "SB",
 }
 
 var OperatorSymbols = map[string]string{
