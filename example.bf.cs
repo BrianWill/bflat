@@ -28,6 +28,7 @@ public Monkey : Bar, Eater {
 		i = 5;
 		me.zelda = (float) 6.0;
 		me.lisa();
+		me.david();
 	}
 }
 
@@ -46,10 +47,12 @@ public Bar : Foo {
 		int i = 3;
 		i = 5;
 		Eater test;
+		test = new myspace.Monkey();
+		test.david();
 	}
 }
 
 public Eater {
-	public int david(float);
+	public void david();
 }
 

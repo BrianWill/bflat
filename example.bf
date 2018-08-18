@@ -27,6 +27,7 @@
         (as i 5)
         (as [zelda] 6.0)
         (lisa me)
+        (david me)
     )
 )
 
@@ -44,6 +45,8 @@
         (var i 3)
         (as i 5)
         (var test Eater)
+        (as test (Monkey))
+        (david test)
     )
 
     (constructor 

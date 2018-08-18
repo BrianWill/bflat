@@ -666,6 +666,14 @@ type Namespace struct {
 	FullNames    map[string]string // unqualifieid name -> fully qualified name
 }
 
+type TypeInfo interface {
+	TypeInfo()
+}
+
+func (a *ClassInfo) TypeInfo()     {}
+func (a *StructInfo) TypeInfo()    {}
+func (a *InterfaceInfo) TypeInfo() {}
+
 var StrType = DataType{
 	Name: "Str",
 }

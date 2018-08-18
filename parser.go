@@ -1276,21 +1276,21 @@ func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDe
 	return interfaceDef, nil
 }
 
-func parseMethodSignature(parens ParenList) ([]DataType, DataType, string, error) {
-	var name string
-	var returnType DataType
+func parseMethodSignature(parens ParenList) (paramTypes []DataType, returnType DataType, name string, err error) {
+	paramTypes = []DataType{}
 	atoms := parens.Atoms
 	if len(atoms) < 2 {
 		return nil, DataType{}, "", errors.New("Invalid method signature: " + spew.Sdump(parens))
 	}
 	if symbol, ok := atoms[1].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
-			return nil, DataType{}, "", errors.New("Invalid method name (cannot begin with uppercase): " + spew.Sdump(symbol))
+			err = errors.New("Invalid method name (cannot begin with uppercase): " + spew.Sdump(symbol))
+			return
 		}
 		name = symbol.Content
 	}
 	if len(atoms) < 3 {
-		return nil, DataType{}, "", nil
+		return
 	}
 	idx := 2
 	dataType, err := parseDataType(atoms[idx])
@@ -1299,13 +1299,15 @@ func parseMethodSignature(parens ParenList) ([]DataType, DataType, string, error
 		idx++
 	}
 	if len(atoms) <= idx {
-		return nil, DataType{}, "", errors.New("Incomplete method definition: " + spew.Sdump(parens))
+		err = errors.New("Incomplete method definition: " + spew.Sdump(parens))
+		return
 	}
 	// params
-	paramTypes := []DataType{}
+
 	if sigil, ok := atoms[idx].(SigilAtom); ok {
 		if sigil.Content != ":" {
-			return nil, DataType{}, "", errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
+			err = errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
+			return
 		}
 		idx++
 		for _, atom := range atoms[idx:] {
@@ -1316,5 +1318,5 @@ func parseMethodSignature(parens ParenList) ([]DataType, DataType, string, error
 			paramTypes = append(paramTypes, dataType)
 		}
 	}
-	return paramTypes, returnType, name, nil
+	return
 }

@@ -118,10 +118,7 @@ func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
 func compileCallForm(op CallForm, ns *Namespace, expectedType DataType,
 	locals map[string]DataType) (string, DataType, error) {
 	fullName := fullName(op.Name, op.Namespace, ns)
-
-	var returnType DataType
 	sigs := append(ns.Funcs[fullName], ns.Methods[fullName]...)
-	matching := []int{}
 	if len(sigs) == 0 {
 		return compileOperation(op, ns, expectedType, locals)
 	}
@@ -138,49 +135,58 @@ func compileCallForm(op CallForm, ns *Namespace, expectedType DataType,
 	code := ""
 
 	// find sigs which match args
+	var returnType DataType
+
+	matching := []*CallableInfo{}
 Loop:
-	for i, sig := range sigs {
+	for _, sig := range sigs {
 		if len(argTypes) == len(sig.ParamTypes) {
 			for j, paramType := range sig.ParamTypes {
 				if !isType(argTypes[j], paramType, ns, false) {
 					continue Loop
 				}
 			}
-			matching = append(matching, i)
+			matching = append(matching, sig)
 		}
 	}
 
-	switch len(matching) {
-	case 0:
+	if len(matching) == 0 {
 		return compileOperation(op, ns, expectedType, locals)
-	case 1:
-		sig := sigs[matching[0]]
-		isMethod := sig.IsMethod
-		if isMethod {
-			code += argCode[0] + "."
-		} else {
-			if op.Namespace == "" {
-				code += ns.Name + "." + FuncsClass + "."
-			} else {
-				code += op.Namespace + "." + FuncsClass + "."
-			}
-		}
-		code += op.Name + "("
-		for i, arg := range argCode {
-			if isMethod && i == 0 {
-				continue
-			}
-			if i == len(argCode)-1 {
-				code += arg
-			} else {
-				code += arg + ","
-			}
-		}
-		code += ")"
-		returnType = sig.ReturnType
-	default:
-		return "", DataType{}, msg(op.Line, op.Column, "Call is ambiguous (multiple matching methods or functions).")
 	}
+
+	sig := matching[0]
+	if len(matching) > 1 {
+		var err error
+		sig, err = ClosestMatchingSignature(matching, ns, op.Line, op.Column)
+		if err != nil {
+			return "", DataType{}, err
+		}
+	}
+
+	isMethod := sig.IsMethod
+	if isMethod {
+		code += argCode[0] + "."
+	} else {
+		if op.Namespace == "" {
+			code += ns.Name + "." + FuncsClass + "."
+		} else {
+			code += op.Namespace + "." + FuncsClass + "."
+		}
+	}
+	code += op.Name + "("
+	for i, arg := range argCode {
+		if isMethod && i == 0 {
+			continue
+		}
+		if i == len(argCode)-1 {
+			code += arg
+		} else {
+			code += arg + ","
+		}
+	}
+	code += ")"
+	returnType = sig.ReturnType
+
 	return code, returnType, nil
 }
 

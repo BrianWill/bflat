@@ -78,10 +78,20 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 
 		sigs := map[string]SignatureInfo{}
 		for j, methodName := range interfaceDef.MethodNames {
+			params := interfaceDef.MethodParams[j]
+			returnType := interfaceDef.MethodReturnTypes[j]
 			sigs[methodName] = SignatureInfo{
-				ParamTypes: interfaceDef.MethodParams[j],
-				ReturnType: interfaceDef.MethodReturnTypes[j],
+				ParamTypes: params,
+				ReturnType: returnType,
 			}
+			methods[methodName] = append(methods[methodName],
+				&CallableInfo{
+					IsMethod:   true,
+					ParamNames: make([]string, len(params)+1), // in case some loop uses len of ParamNames
+					ParamTypes: append([]DataType{interfaceDef.Type}, params...),
+					ReturnType: returnType,
+				},
+			)
 		}
 
 		interfaces[fullName] = &InterfaceInfo{
@@ -253,6 +263,7 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 		}
 	}
 
+	// check that classes actually implement their interfaces
 	for _, classDef := range topDefs.Classes {
 		fullName := fullNames[classDef.Type.Name]
 		classInfo := classes[fullName]
@@ -375,6 +386,20 @@ func (dt DataType) CSName(ns *Namespace) string {
 	} else {
 		return dt.Namespace + "." + dt.Name
 	}
+}
+
+func (dt DataType) GetInfo(ns *Namespace) (TypeInfo, bool) {
+	fullname := dt.FullName(ns)
+	if ti, ok := ns.Interfaces[fullname]; ok {
+		return ti, true
+	}
+	if ti, ok := ns.Classes[fullname]; ok {
+		return ti, true
+	}
+	if ti, ok := ns.Structs[fullname]; ok {
+		return ti, true
+	}
+	return nil, false
 }
 
 func isZeroType(dt DataType) bool {
@@ -548,6 +573,55 @@ func (ci *ClassInfo) IsDescendent(ancestor *ClassInfo) bool {
 		}
 	}
 	return false
+}
+
+// only first param matters,
+// assumes len(sigs) >= 2
+// we can assume that all sigs have at least one param
+func ClosestMatchingSignature(sigs []*CallableInfo, ns *Namespace, line int, column int) (*CallableInfo, error) {
+	interfaceCalls := []*CallableInfo{}
+	classCalls := []*CallableInfo{}
+	structCalls := []*CallableInfo{}
+	firstParamClass := []*ClassInfo{}
+	for _, sig := range sigs {
+		if !sig.IsMethod {
+			return nil, msg(line, column, "Call ambiguously matches one or more functions but also one or more methods.")
+		}
+		ti, ok := sig.ParamTypes[0].GetInfo(ns)
+		if !ok {
+			return nil, msg(line, column, "Internal error: GetInfo() should never return false in ClosestMatchingSignature")
+		}
+		switch ti := ti.(type) {
+		case *InterfaceInfo:
+			interfaceCalls = append(interfaceCalls, sig)
+		case *ClassInfo:
+			classCalls = append(classCalls, sig)
+			firstParamClass = append(firstParamClass, ti)
+		case *StructInfo:
+			structCalls = append(structCalls, sig)
+		}
+	}
+	if len(classCalls) > 0 {
+		// we can assume all classes are related
+		// we want to find lowest in hierarchy
+		winnerClass := firstParamClass[0]
+		winnerIdx := 0
+		for i := 1; i < len(classCalls); i++ {
+			other := firstParamClass[i]
+			if winnerClass == other {
+				return nil, msg(line, column, "Call ambiguously matches multiple overloads of method.")
+			}
+			if !winnerClass.IsDescendent(other) {
+				winnerClass = other
+				winnerIdx = i
+			}
+		}
+		return classCalls[winnerIdx], nil
+	}
+	if len(structCalls) == 1 {
+		return structCalls[0], nil
+	}
+	return nil, msg(line, column, "Call ambiguously matches multiple methods.")
 }
 
 func (ci *InterfaceInfo) IsImplementor(ii *InterfaceInfo) bool {
@@ -1260,11 +1334,16 @@ func compileInterface(def InterfaceDef, ns *Namespace, indent string) (string, e
 	}
 	code += " {\n"
 	for i, methodName := range def.MethodNames {
-		c, err := compileType(def.MethodReturnTypes[i], ns)
-		if err != nil {
-			return "", err
+		returnType := def.MethodReturnTypes[i]
+		if isZeroType(returnType) {
+			code += "\tpublic void " + methodName + "("
+		} else {
+			c, err := compileType(returnType, ns)
+			if err != nil {
+				return "", err
+			}
+			code += "\tpublic " + c + " " + methodName + "("
 		}
-		code += "\tpublic " + c + " " + methodName + "("
 		for j, param := range def.MethodParams[i] {
 			c, err := compileType(param, ns)
 			if err != nil {
