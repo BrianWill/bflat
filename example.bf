@@ -1,10 +1,14 @@
 
-(ns myspace)
+(ns example)
+
+(import otherspace)
 
 (func main
     (var i 3)
     (as i (add 5 3))
+    (tracy)
     (as i (kevin 2)))
+
 
 (func kevin I : a I
     (return (add a 4)))

@@ -7,14 +7,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
-func parse(readerData []Atom) (TopDefs, error) {
-	topDefs := TopDefs{
-		Classes: []ClassDef{},
-		Structs: []StructDef{},
-		Funcs:   []FuncDef{},
-		Globals: []GlobalDef{},
-	}
-
+func parse(readerData []Atom, topDefs *TopDefs, isMain bool) error {
 	annotations := []AnnotationForm{}
 
 	for _, atom := range readerData {
@@ -22,77 +15,93 @@ func parse(readerData []Atom) (TopDefs, error) {
 		case ParenList:
 			elems := atom.Atoms
 			if len(elems) == 0 {
-				return TopDefs{}, errors.New("Invalid top-level atom: " + spew.Sdump(atom))
+				return errors.New("Invalid top-level atom: " + spew.Sdump(atom))
 			}
 			if sigil, ok := elems[0].(SigilAtom); ok {
 				if sigil.Content != "@" {
-					return TopDefs{}, errors.New("Invalid top-level atom: " + spew.Sdump(atom))
+					return errors.New("Invalid top-level atom: " + spew.Sdump(atom))
 				}
 				annotation, err := parseAnnotation(atom)
 				if err != nil {
-					return TopDefs{}, err
+					return err
 				}
 				annotations = append(annotations, annotation)
 				continue
 			}
 			first, ok := elems[0].(Symbol)
 			if !ok {
-				return TopDefs{}, errors.New("Invalid top-level atom: " + spew.Sdump(atom))
+				return errors.New("Invalid top-level atom: " + spew.Sdump(atom))
 			}
 			switch first.Content {
 			case "class":
 				class, err := parseClass(atom, annotations)
 				if err != nil {
-					return TopDefs{}, err
+					return err
 				}
 				topDefs.Classes = append(topDefs.Classes, class)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "struct":
 				structDef, err := parseStruct(atom, annotations, false)
 				if err != nil {
-					return TopDefs{}, err
+					return err
 				}
 				topDefs.Structs = append(topDefs.Structs, structDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "func":
 				funcDef, err := parseFunc(atom, annotations)
 				if err != nil {
-					return TopDefs{}, err
+					return err
+				}
+				if !isMain && funcDef.Name == "main" {
+					return msg(funcDef.Line, funcDef.Column, "A 'main' function can only be declared in the main file of the namespace.")
 				}
 				topDefs.Funcs = append(topDefs.Funcs, funcDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "interface":
 				interfaceDef, err := parseInterface(atom, annotations)
 				if err != nil {
-					return TopDefs{}, err
+					return err
 				}
 				topDefs.Interfaces = append(topDefs.Interfaces, interfaceDef)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "global":
 				global, err := parseGlobal(atom, annotations)
 				if err != nil {
-					return TopDefs{}, err
+					return err
 				}
 				topDefs.Globals = append(topDefs.Globals, global)
 				annotations = []AnnotationForm{} // reset to empty slice
 			case "ns":
+				if !isMain {
+					return msg(first.Line, first.Column, "Namespace should only be declared in the main source file of the namespace.")
+				}
 				if topDefs.Namespace.Name != "" {
-					return TopDefs{}, errors.New("Cannot have more than one namespace declaration in a file: " + spew.Sdump(atom))
+					return errors.New("Cannot have more than one namespace declaration in a file: " + spew.Sdump(atom))
 				}
 				ns, err := parseNamespaceDef(atom, annotations)
 				if err != nil {
-					return TopDefs{}, err
+					return err
 				}
 				topDefs.Namespace = ns
 				annotations = []AnnotationForm{} // reset to empty slice
+			case "import":
+				if !isMain {
+					return msg(first.Line, first.Column, "Imports should only go in the main source file of the namespace.")
+				}
+				importDef, err := parseImportDef(atom, annotations)
+				if err != nil {
+					return err
+				}
+				topDefs.Imports = append(topDefs.Imports, importDef)
+				annotations = []AnnotationForm{} // reset to empty slice
 			default:
-				return TopDefs{}, errors.New("Invalid top-level atom: " + spew.Sdump(atom))
+				return errors.New("Invalid top-level atom: " + spew.Sdump(atom))
 			}
 		default:
-			return TopDefs{}, errors.New("Invalid top-level atom: " + spew.Sdump(atom))
+			return errors.New("Invalid top-level atom: " + spew.Sdump(atom))
 		}
 	}
-	return topDefs, nil
+	return nil
 }
 
 // assumes first atom is @ sigil
@@ -368,11 +377,119 @@ func parseDataType(atom Atom) (DataType, error) {
 			}
 			dataType.Namespace = namespace
 		default:
+			return DataType{}, errors.New("Improperly formed data type name: " + spew.Sdump(atom))
 		}
 	default:
 		return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 	}
 	return dataType, nil
+}
+
+func parseImportDef(parens ParenList, annotations []AnnotationForm) (ImportDef, error) {
+	atoms := parens.Atoms
+	if len(atoms) < 2 {
+		return ImportDef{}, errors.New("Invalid import form. Too few atoms. " + spew.Sdump(atoms))
+	}
+	symbol, ok := atoms[1].(Symbol)
+	if !ok {
+		return ImportDef{}, errors.New("Invalid import form. Expecting symbol. " + spew.Sdump(atoms))
+	}
+	if symbol.Content == strings.Title(symbol.Content) {
+		return ImportDef{}, errors.New("Invalid import form: imported namespace cannot start with uppercase letter. " + spew.Sdump(atoms))
+	}
+	exclusions := []string{}
+	aliases := map[string]string{}
+	shortname := ""
+	if len(atoms) > 2 {
+		idx := 2
+		if chain, ok := atoms[idx].(AtomChain); ok {
+			if len(chain.Atoms) != 2 {
+				return ImportDef{}, msg(parens.Line, parens.Column, "Unexpected atom chain in import form.")
+			}
+			if sigil, ok := chain.Atoms[0].(SigilAtom); ok {
+				if sigil.Content != "-" {
+					return ImportDef{}, msg(parens.Line, parens.Column, "Expecting - in atom chain of import form..")
+				}
+			} else {
+				return ImportDef{}, msg(parens.Line, parens.Column, "Expecting - in atom chain of import form..")
+			}
+			if symbol, ok := chain.Atoms[1].(Symbol); ok {
+				if symbol.Content != "shortname" {
+					return ImportDef{}, msg(parens.Line, parens.Column, "Expecting 'shortname' symbol in atom chain of import form..")
+				}
+			} else {
+				return ImportDef{}, msg(parens.Line, parens.Column, "Expecting 'shortname' symbol in atom chain of import form..")
+			}
+			idx++
+			if symbol, ok := atoms[idx].(Symbol); ok {
+				shortname = symbol.Content
+				if shortname == strings.Title(shortname) {
+					return ImportDef{}, msg(parens.Line, parens.Column, "Import shortname cannot start with uppercase letter.")
+				}
+			} else {
+				return ImportDef{}, msg(parens.Line, parens.Column, "Expecting symbol for import shortname.")
+			}
+			idx++
+		}
+
+		for _, atom := range atoms[idx:] {
+			if parens, ok := atom.(ParenList); ok {
+				if len(parens.Atoms) < 2 {
+					return ImportDef{}, msg(parens.Line, parens.Column, "Parens in import form contains too few atoms.")
+				}
+				if symbol, ok := parens.Atoms[0].(Symbol); ok {
+					switch symbol.Content {
+					case "exclude":
+						if len(parens.Atoms) != 2 {
+							return ImportDef{}, msg(parens.Line, parens.Column, "Exclude form in import expecting two atoms.")
+						}
+						if symbol, ok := parens.Atoms[1].(Symbol); ok {
+							exclusions = append(exclusions, symbol.Content)
+						} else {
+							return ImportDef{}, msg(parens.Line, parens.Column, "Exclude form in import expecting symbol to exclude.")
+						}
+					case "alias":
+						if len(parens.Atoms) != 3 {
+							return ImportDef{}, msg(parens.Line, parens.Column, "Alias form in import expecting three atoms.")
+						}
+						var original string
+						var substitute string
+						if symbol, ok := parens.Atoms[1].(Symbol); ok {
+							original = symbol.Content
+						} else {
+							return ImportDef{}, msg(parens.Line, parens.Column, "Alias form in import expecting symbol to alias.")
+						}
+						if symbol, ok := parens.Atoms[2].(Symbol); ok {
+							substitute = symbol.Content
+						} else {
+							return ImportDef{}, msg(parens.Line, parens.Column, "Alias form in import expecting symbol for alias.")
+						}
+						// alias starting cases should match
+						if (original == strings.Title(original)) !=
+							(substitute == strings.Title(substitute)) {
+							return ImportDef{}, msg(parens.Line, parens.Column, "Alias form in import expecting symbols with same starting letter case.")
+						}
+						aliases[original] = substitute
+					default:
+						return ImportDef{}, msg(parens.Line, parens.Column, "Parens in import form starts with unexpected symbol.")
+					}
+				} else {
+					return ImportDef{}, msg(parens.Line, parens.Column, "Parens in import form should start with a symbol.")
+				}
+			} else {
+				return ImportDef{}, errors.New("Invalid atom in import form: expecting parens. " + spew.Sdump(atoms))
+			}
+		}
+	}
+	return ImportDef{
+		Line:        symbol.Line,
+		Column:      symbol.Column,
+		Namespace:   symbol.Content,
+		Shortname:   shortname,
+		Exclusions:  exclusions,
+		Aliases:     aliases,
+		Annotations: annotations,
+	}, nil
 }
 
 func parseNamespaceDef(parens ParenList, annotations []AnnotationForm) (NamespaceDef, error) {
@@ -1243,11 +1360,11 @@ func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDe
 			}
 		}
 	}
-	DataType, err := parseDataType(elems[idx])
+	dataType, err := parseDataType(elems[idx])
 	if err != nil {
 		return InterfaceDef{}, errors.New("Interface has invalid name: " + err.Error())
 	}
-	interfaceDef.Type = DataType
+	interfaceDef.Type = dataType
 	idx++
 	for _, atom := range elems[idx:] {
 		parens, ok := atom.(ParenList)

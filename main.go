@@ -3,10 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
-	"time"
 )
 
 type Token struct {
@@ -154,10 +152,21 @@ type GlobalDef struct {
 	Annotations []AnnotationForm
 }
 
+type ImportDef struct {
+	Line        int
+	Column      int
+	Namespace   string
+	Shortname   string
+	Exclusions  []string
+	Aliases     map[string]string
+	Annotations []AnnotationForm
+}
+
 type NamespaceDef struct {
 	Line        int
 	Column      int
 	Name        string
+	Shortname   string // for namespace names with dots, the part after the last dot
 	Annotations []AnnotationForm
 }
 
@@ -186,25 +195,28 @@ type ClassDef struct {
 }
 
 type ClassInfo struct {
-	Name       string
-	Namespace  string
-	Parent     *ClassInfo
-	Fields     map[string]FieldInfo
-	Interfaces []*InterfaceInfo
+	Name           string
+	Namespace      string
+	ShortNamespace string
+	Parent         *ClassInfo
+	Fields         map[string]FieldInfo
+	Interfaces     []*InterfaceInfo
 }
 
 type StructInfo struct {
-	Name       string
-	Namespace  string
-	Fields     map[string]FieldInfo
-	Interfaces []*InterfaceInfo
+	Name           string
+	Namespace      string
+	ShortNamespace string
+	Fields         map[string]FieldInfo
+	Interfaces     []*InterfaceInfo
 }
 
 type InterfaceInfo struct {
-	Name       string
-	Namespace  string
-	Parents    []*InterfaceInfo
-	Signatures map[string]SignatureInfo
+	Name           string
+	Namespace      string
+	ShortNamespace string
+	Parents        []*InterfaceInfo
+	Signatures     map[string]SignatureInfo
 }
 
 type IsImplementor interface {
@@ -212,8 +224,9 @@ type IsImplementor interface {
 }
 
 type GlobalInfo struct {
-	Name      string
-	Namespace string
+	Name           string
+	Namespace      string
+	ShortNamespace string
 }
 
 type SignatureInfo struct {
@@ -223,6 +236,7 @@ type SignatureInfo struct {
 
 type CallableInfo struct {
 	IsMethod   bool
+	Namespace  string
 	ParamNames []string
 	ParamTypes []DataType
 	ReturnType DataType
@@ -649,6 +663,7 @@ type TopDefs struct {
 	Interfaces []InterfaceDef
 	Funcs      []FuncDef
 	Globals    []GlobalDef
+	Imports    []ImportDef
 }
 
 const GlobalsClass = "_Globals"
@@ -727,52 +742,41 @@ var OperatorSymbols = map[string]string{
 }
 
 func main() {
-	// if len(os.Args) != 2 {
-	//     fmt.Println("Must specify a .bf file.")
-	//     return
-	// }
-	// inputFilename := os.Args[1]
-	inputFilename := "example.bf"
+	debugMode := true
+	var directory string
+	var namespace string
+	if debugMode {
+		directory = "."
+		namespace = "example"
+	} else {
+		if len(os.Args) < 2 {
+			fmt.Println("Must specify a namespace (short name) and directory.")
+			return
+		}
+		namespace = os.Args[1] // expecting the short name, not the full namespace name
 
-	data, err := ioutil.ReadFile(inputFilename)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	data = append(data, '\n')
-	start := time.Now()
-	tokens, err := lex(string(data))
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	atoms, err := read(tokens)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	topDefs, err := parse(atoms)
-	if err != nil {
-		fmt.Println(err)
-		return
+		directory = "."
+		if len(os.Args) == 3 {
+			directory = os.Args[2]
+		}
+
+		if len(os.Args) > 3 {
+			fmt.Println("Too many program arguments. Expecting 2 program arguments at most.")
+			return
+		}
 	}
 
-	code, err := compile(topDefs)
+	err := compileNamespace(namespace, directory, map[string]*Namespace{})
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+}
 
-	debug("Time: ", time.Since(start))
-
-	outputFilename := inputFilename + ".cs"
-	err = ioutil.WriteFile(outputFilename, []byte(code), os.ModePerm)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	// todo: use https://github.com/dotnet/codeformatter to format the code
+// within a base directory, get all the source files mapped to their namespace
+func sourceDirectory(basedir string) map[string][]string {
+	// todo
+	return nil
 }
 
 func msg(line int, column int, s string) error {

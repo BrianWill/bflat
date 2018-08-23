@@ -127,10 +127,12 @@ func lex(code string) ([]Token, error) {
 			tokens = append(tokens, Token{NumberLiteral, string(runes[i:endIdx]), line, column})
 			column += (endIdx - i)
 			i = endIdx
-		} else if isAlpha(r) || r == '_' { // start of a word
+		} else if isAlpha(r) { // start of a word
 			endIdx := i + 1
-			for isAlpha(runes[endIdx]) || runes[endIdx] == '_' {
+			r := runes[endIdx]
+			for isAlpha(r) || r == '_' || isNumeral(r) {
 				endIdx++
+				r = runes[endIdx]
 			}
 
 			content := string(runes[i:endIdx])

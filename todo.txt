@@ -4,6 +4,8 @@
 
 - check for name collisions between namespace qualified names and locals, e.g. foo.Bar and foo (is c# smart about this?)
 
+    (maybe just underscore prefix all namespace names in csharp)
+
 - account for member access levels
 
 
@@ -16,8 +18,25 @@
 
 - importing csharp
 
-- interfaces
 
 - arrays
 
 - generics
+
+
+
+(ns red.orange.blue)      // 'blue' is the short name; (in C#, equivalent of Red.Orange.Blue) 
+
+                          // file convention: shortname_file.bf
+                          // e.g. file 'foo' in namespace with shortname 'bar':
+                          //            bar_foo.bf
+
+                          // the containing directory should be named 'red.orange' or 'red.orange.blue'
+
+                          // the existence of directory 'a.b.c' doesn't necessarily imply existence of 'a.b', 
+                          // but if they both exist, then 'a.b.c' should be directly inside 'a.b'
+
+
+
+(import red.orange.blue -alias something)       // in case shortname conflicts with other import, give it alias
+                                 

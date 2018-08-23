@@ -167,11 +167,7 @@ Loop:
 	if isMethod {
 		code += argCode[0] + "."
 	} else {
-		if op.Namespace == "" {
-			code += ns.Name + "." + FuncsClass + "."
-		} else {
-			code += op.Namespace + "." + FuncsClass + "."
-		}
+		code += sig.Namespace + "." + FuncsClass + "."
 	}
 	code += op.Name + "("
 	for i, arg := range argCode {

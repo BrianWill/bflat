@@ -2,19 +2,19 @@ package main
 
 import (
 	"errors"
+	"io/ioutil"
+	"log"
 	"math"
+	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/davecgh/go-spew/spew"
 )
 
-func compile(topDefs TopDefs) (string, error) {
-	ns, err := createNamespace(topDefs)
-	if err != nil {
-		return "", err
-	}
-
-	code := ""
+func codeGen(topDefs *TopDefs, ns *Namespace) (string, error) {
+	code := "namespace " + ns.Name + " {\n\n"
 
 	c, err := compileGlobals(topDefs.Globals, ns)
 	if err != nil {
@@ -48,11 +48,94 @@ func compile(topDefs TopDefs) (string, error) {
 		code += c
 	}
 
+	code += "}"
+
 	return code, nil
 }
 
-func createNamespace(topDefs TopDefs) (*Namespace, error) {
-	namespace := topDefs.Namespace.Name
+func compileNamespace(namespace string, basedir string, namespaces map[string]*Namespace) error {
+	if _, ok := namespaces[namespace]; ok {
+		return errors.New("Recursive import depedency: " + namespace)
+	}
+
+	topDefs := &TopDefs{
+		Classes: []ClassDef{},
+		Structs: []StructDef{},
+		Funcs:   []FuncDef{},
+		Globals: []GlobalDef{},
+		Imports: []ImportDef{},
+	}
+
+	files, err := ioutil.ReadDir(basedir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	namespaceShortName := namespace[strings.LastIndex(namespace, ".")+1:]
+	hasMain := false
+	prefix := namespaceShortName + "_"
+	start := time.Now()
+	for _, file := range files {
+		name := file.Name()
+		isMain := name == namespaceShortName+".bf"
+		if isMain {
+			hasMain = true
+		}
+		if isMain || (strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".bf")) {
+
+			data, err := ioutil.ReadFile(basedir + "/" + name)
+			if err != nil {
+				return err
+			}
+			data = append(data, '\n')
+			tokens, err := lex(string(data))
+			if err != nil {
+				return err
+			}
+			atoms, err := read(tokens)
+			if err != nil {
+				return err
+			}
+			err = parse(atoms, topDefs, isMain)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if !hasMain {
+		return errors.New("Cannot compile namespace '" + namespace + "': expecting a file named '" + namespaceShortName + ".bf'")
+	}
+
+	ns, err := createNamespace(topDefs, namespace, basedir, namespaces)
+	if err != nil {
+		return err
+	}
+	namespaces[namespace] = ns
+
+	code, err := codeGen(topDefs, ns)
+	if err != nil {
+		return err
+	}
+
+	debug("Time: ", time.Since(start))
+
+	outputFilename := namespaceShortName + ".cs"
+	err = ioutil.WriteFile(outputFilename, []byte(code), os.ModePerm)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createNamespace(topDefs *TopDefs, namespace string, basedir string, namespaces map[string]*Namespace) (*Namespace, error) {
+	if topDefs.Namespace.Name == "" {
+		return nil, errors.New("Namespace '" + namespace + "' missing its namespace declaration.")
+	}
+	if topDefs.Namespace.Name != namespace {
+		return nil, errors.New("Namespace '" + namespace + "' declaration does not match expected name.")
+	}
 	interfaces := map[string]*InterfaceInfo{}
 	classes := map[string]*ClassInfo{}
 	structs := map[string]*StructInfo{}
@@ -61,12 +144,98 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 	constructors := map[string][]*CallableInfo{}
 	methods := map[string][]*CallableInfo{}
 
-	fullNames := map[string]string{} // unqualified names -> fully qualified names
-	// todo populate classes and fullNames with imports
-	// an unqualified import will have two entries in fullNames:
-	// e.g. importing foo from namespace bar to namespace ack will have two entries in ack's fullNames:
-	// 		foo/bar
-	//		foo/ack
+	fullNames := map[string]string{} // unqualified names or partly qualified names -> full qualified names
+	// e.g. foo                 -> foo/mynamspace.subnamespace
+	//      foo/subnamespace    -> foo/mynamspace.subnamespace
+
+	shortnames := map[string]bool{}
+	for _, importDef := range topDefs.Imports {
+		if _, ok := shortnames[importDef.Shortname]; ok {
+			return nil, errors.New("Name collision between imported namespace short names: " + importDef.Shortname)
+		}
+	}
+
+	for _, importDef := range topDefs.Imports {
+
+		foreign, ok := namespaces[importDef.Namespace]
+		if !ok {
+			err := compileNamespace(importDef.Namespace, basedir, namespaces)
+			if err != nil {
+				return nil, err
+			}
+			foreign = namespaces[importDef.Namespace]
+		}
+
+		for key, interfaceInfo := range foreign.Interfaces {
+			if interfaceInfo.Namespace == foreign.Name {
+				interfaces[key] = interfaceInfo
+				if _, ok := fullNames[interfaceInfo.Name]; ok {
+					return nil, errors.New("Name collision: " + interfaceInfo.Name + " imported from more than one namespaces.")
+				}
+				fullNames[interfaceInfo.Name] = key
+				fullNames[interfaceInfo.Name+"/"+interfaceInfo.ShortNamespace] = key
+			}
+		}
+
+		for key, classInfo := range foreign.Classes {
+			if classInfo.Namespace == foreign.Name {
+				classes[key] = classInfo
+				if _, ok := fullNames[classInfo.Name]; ok {
+					return nil, errors.New("Name collision: " + classInfo.Name + " imported from more than one namespaces.")
+				}
+				fullNames[classInfo.Name] = key
+				fullNames[classInfo.Name+"/"+classInfo.ShortNamespace] = key
+			}
+		}
+
+		for key, structInfo := range foreign.Structs {
+			if structInfo.Namespace == foreign.Name {
+				structs[key] = structInfo
+				if _, ok := fullNames[structInfo.Name]; ok {
+					return nil, errors.New("Name collision: " + structInfo.Name + " imported from more than one namespaces.")
+				}
+				fullNames[structInfo.Name] = key
+				fullNames[structInfo.Name+"/"+structInfo.ShortNamespace] = key
+			}
+		}
+
+		for key, globalInfo := range foreign.Globals {
+			if globalInfo.Namespace == foreign.Name {
+				globals[key] = globalInfo
+				if _, ok := fullNames[globalInfo.Name]; ok {
+					return nil, errors.New("Name collision: " + globalInfo.Name + " imported from more than one namespaces.")
+				}
+				fullNames[globalInfo.Name] = key
+				fullNames[globalInfo.Name+"/"+globalInfo.ShortNamespace] = key
+			}
+		}
+
+		// we don't look for function signature conflicts between imported namespaces because
+		// we only care about conflicts at call sites
+
+		for key, callables := range foreign.Funcs {
+			for _, callable := range callables {
+				if callable.Namespace == foreign.Name {
+					funcs[key] = append(funcs[key], callable)
+				}
+			}
+		}
+
+		for key, callables := range foreign.Constructors {
+			if len(callables) > 1 && callables[0].Namespace == foreign.Name {
+				constructors[key] = callables
+			}
+		}
+
+		// methods
+		for key, callables := range foreign.Methods {
+			for _, callable := range callables {
+				if callable.Namespace == foreign.Name {
+					methods[key] = append(methods[key], callable)
+				}
+			}
+		}
+	}
 
 	for i, interfaceDef := range topDefs.Interfaces {
 		if _, ok := fullNames[interfaceDef.Type.Name]; ok {
@@ -210,11 +379,10 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 	}
 
 	for _, fn := range topDefs.Funcs {
-		fullName := fn.Name + "/" + namespace
-		fullNames[fn.Name] = fullName
-		funcs[fullName] = append(funcs[fullName],
+		funcs[fn.Name] = append(funcs[fn.Name],
 			&CallableInfo{
 				IsMethod:   false,
+				Namespace:  namespace,
 				ParamNames: fn.ParamNames,
 				ParamTypes: fn.ParamTypes,
 				ReturnType: fn.ReturnType,
@@ -233,6 +401,7 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 			constructors[fullName] = append(constructors[fullName],
 				&CallableInfo{
 					IsMethod:   false,
+					Namespace:  namespace,
 					ParamNames: constructor.ParamNames,
 					ParamTypes: constructor.ParamTypes,
 					ReturnType: class.Type,
@@ -244,6 +413,7 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 			constructors[fullName] = append(constructors[fullName],
 				&CallableInfo{
 					IsMethod:   false,
+					Namespace:  namespace,
 					ParamNames: nil,
 					ParamTypes: nil,
 					ReturnType: class.Type,
@@ -255,6 +425,7 @@ func createNamespace(topDefs TopDefs) (*Namespace, error) {
 			methods[method.Name] = append(methods[method.Name],
 				&CallableInfo{
 					IsMethod:   true,
+					Namespace:  namespace,
 					ParamNames: append([]string{thisWord}, method.ParamNames...),
 					ParamTypes: append([]DataType{class.Type}, method.ParamTypes...),
 					ReturnType: method.ReturnType,
@@ -579,13 +750,18 @@ func (ci *ClassInfo) IsDescendent(ancestor *ClassInfo) bool {
 // assumes len(sigs) >= 2
 // we can assume that all sigs have at least one param
 func ClosestMatchingSignature(sigs []*CallableInfo, ns *Namespace, line int, column int) (*CallableInfo, error) {
+	funcCalls := []*CallableInfo{}
 	interfaceCalls := []*CallableInfo{}
 	classCalls := []*CallableInfo{}
 	structCalls := []*CallableInfo{}
 	firstParamClass := []*ClassInfo{}
+	allFuncs := true
 	for _, sig := range sigs {
-		if !sig.IsMethod {
-			return nil, msg(line, column, "Call ambiguously matches one or more functions but also one or more methods.")
+		if sig.IsMethod {
+			allFuncs = false
+		} else {
+			funcCalls = append(funcCalls, sig)
+			continue
 		}
 		ti, ok := sig.ParamTypes[0].GetInfo(ns)
 		if !ok {
@@ -600,6 +776,11 @@ func ClosestMatchingSignature(sigs []*CallableInfo, ns *Namespace, line int, col
 		case *StructInfo:
 			structCalls = append(structCalls, sig)
 		}
+	}
+	if allFuncs {
+		return nil, msg(line, column, "Call ambiguously matches multiple functions.")
+	} else if len(funcCalls) > 0 {
+		return nil, msg(line, column, "Call ambiguously matches both one or more functions and one or more methods.")
 	}
 	if len(classCalls) > 0 {
 		// we can assume all classes are related
@@ -686,7 +867,11 @@ func compileExpression(expr Expression, ns *Namespace, expectedType DataType,
 			if !ok {
 				return "", DataType{}, msg(expr.Line, expr.Column, "No local variable found of name: "+expr.Name)
 			}
-			code = expr.Name
+			if expr.Name == thisWord {
+				code = "this"
+			} else {
+				code = "_" + expr.Name // use _ prefix to avoid name conflicts with namespaces
+			}
 		}
 	case ParsedNumberAtom:
 		if isZeroType(expectedType) {
@@ -967,9 +1152,9 @@ func compileBody(statements []Statement, returnType DataType,
 				}
 			}
 			if valStr == "" {
-				c = indent + typeStr + " " + f.Target + ";\n"
+				c = indent + typeStr + " _" + f.Target + ";\n"
 			} else {
-				c = indent + typeStr + " " + f.Target + " = " + valStr + ";\n"
+				c = indent + typeStr + " _" + f.Target + " = " + valStr + ";\n"
 			}
 			if isZeroType(f.Type) {
 				locals[f.Target] = exprType
@@ -1028,7 +1213,7 @@ func compileAssignment(f AssignmentForm, ns *Namespace, locals map[string]DataTy
 			dt, isLocal = locals[target.Name]
 		}
 		if isLocal {
-			code = target.Name
+			code = "_" + target.Name
 		} else {
 			dt, code = getGlobal(target.Name, target.Namespace, ns)
 			if code == "" {
@@ -1086,7 +1271,7 @@ func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		code += paramName + " " + c
+		code += "_" + paramName + " " + c
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
@@ -1120,7 +1305,7 @@ func compileMethod(f MethodDef, class DataType, ns *Namespace, indent string) (s
 		if err != nil {
 			return "", err
 		}
-		code += paramName + " " + c
+		code += "_" + paramName + " " + c
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
@@ -1144,7 +1329,7 @@ func compileConstructor(f ConstructorDef, class DataType, ns *Namespace, indent 
 		if err != nil {
 			return "", err
 		}
-		code += paramName + " " + c
+		code += "_" + paramName + " " + c
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
