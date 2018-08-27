@@ -1,47 +1,59 @@
 package main
 
-func isNumber(dt DataType) bool {
-	return dt.Name == "I" || dt.Name == "F" || dt.Name == "B" || dt.Name == "SB" || dt.Name == "II" || dt.Name == "FF"
-}
-
-func isInteger(dt DataType) bool {
-	return dt.Name == "I" || dt.Name == "B" || dt.Name == "II" || dt.Name == "SB"
-}
-
-func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
-	locals map[string]DataType) (string, DataType, error) {
+func compileOperation(op CallForm, ns *Namespace, expectedType Type,
+	locals map[ShortName]Type) (string, Type, error) {
 	if op.Namespace != "" {
-		return "", DataType{}, msg(op.Line, op.Column, "Call to unknown method or function.")
+		return "", nil, msg(op.Line, op.Column, "Call to unknown method or function.")
 	}
 	returnType := expectedType
 	expectedArgType := expectedType
 	multiOperand := true
 	switch op.Name {
 	case "add", "sub", "mul", "div":
+		if isZeroType(expectedType) {
+			returnType = LongIntType
+			expectedType = LongIntType
+		}
 		if !isNumber(expectedType) {
-			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+			return "", nil, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
 		}
 	case "lt", "lte", "gt", "gte":
+		if isZeroType(expectedType) {
+			returnType = BoolType
+			expectedType = BoolType
+		}
 		if !isNumber(expectedType) {
-			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+			return "", nil, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
 		}
 		expectedArgType = DoubleType // todo: actually need type which is supertype of all numbers (Long is not subtype of Double)
 	case "inc", "dec":
+		if isZeroType(expectedType) {
+			returnType = LongIntType
+			expectedType = LongIntType
+		}
 		multiOperand = false
 		if !isInteger(expectedType) {
-			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+			return "", nil, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
 		}
 	case "mod", "band", "bor", "bxor":
+		if isZeroType(expectedType) {
+			returnType = LongIntType
+			expectedType = LongIntType
+		}
 		if !isInteger(expectedType) {
-			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+			return "", nil, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
 		}
 	case "bnot":
+		if isZeroType(expectedType) {
+			returnType = LongIntType
+			expectedType = LongIntType
+		}
 		if !isInteger(expectedType) {
-			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
+			return "", nil, msg(op.Line, op.Column, "'"+op.Name+"' operation used where non-number expected")
 		}
 		multiOperand = false
 	case "eq", "neq":
-		expectedArgType = DataType{}
+		expectedArgType = nil
 		returnType = BoolType
 	case "not":
 		multiOperand = false
@@ -51,24 +63,24 @@ func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
 	case "cat":
 		expectedArgType = StrType
 	default:
-		return "", DataType{}, msg(op.Line, op.Column, "Unknown operator, function, or method.")
+		return "", nil, msg(op.Line, op.Column, "Unknown operator, function, or method.")
 	}
 	if multiOperand {
 		if len(op.Args) < 2 {
-			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation requires at least two operands")
+			return "", nil, msg(op.Line, op.Column, "'"+op.Name+"' operation requires at least two operands")
 		}
 	} else {
 		if len(op.Args) != 1 {
-			return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation requires one operand")
+			return "", nil, msg(op.Line, op.Column, "'"+op.Name+"' operation requires one operand")
 		}
 	}
 	operandCode := make([]string, len(op.Args))
-	operandTypes := make([]DataType, len(op.Args))
+	operandTypes := make([]Type, len(op.Args))
 	for i, expr := range op.Args {
 		var err error
 		operandCode[i], operandTypes[i], err = compileExpression(expr, ns, expectedArgType, locals)
 		if err != nil {
-			return "", DataType{}, err
+			return "", nil, err
 		}
 	}
 	code := "("
@@ -88,8 +100,8 @@ func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
 	case "eq", "neq":
 		operatorSymbol := OperatorSymbols[op.Name]
 		for i := 0; i < len(op.Args)-1; i++ {
-			if !isType(operandTypes[i+1], operandTypes[0], ns, true) {
-				return "", DataType{}, msg(op.Line, op.Column, "'"+op.Name+"' operation has mismatched operand types")
+			if operandTypes[i+1] != operandTypes[0] {
+				return "", nil, msg(op.Line, op.Column, "'"+op.Name+"' operation has mismatched operand types")
 			}
 			if i > 0 {
 				code += " && "
@@ -115,8 +127,8 @@ func compileOperation(op CallForm, ns *Namespace, expectedType DataType,
 
 }
 
-func compileCallForm(op CallForm, ns *Namespace, expectedType DataType,
-	locals map[string]DataType) (string, DataType, error) {
+func compileCallForm(op CallForm, ns *Namespace, expectedType Type,
+	locals map[ShortName]Type) (string, Type, error) {
 	fullName := fullName(op.Name, op.Namespace, ns)
 	sigs := append(ns.Funcs[fullName], ns.Methods[fullName]...)
 	if len(sigs) == 0 {
@@ -124,30 +136,34 @@ func compileCallForm(op CallForm, ns *Namespace, expectedType DataType,
 	}
 
 	argCode := make([]string, len(op.Args))
-	argTypes := make([]DataType, len(op.Args))
+	argTypes := make([]Type, len(op.Args))
 	for i, expr := range op.Args {
 		var err error
-		argCode[i], argTypes[i], err = compileExpression(expr, ns, DataType{}, locals)
+		argCode[i], argTypes[i], err = compileExpression(expr, ns, nil, locals)
 		if err != nil {
-			return "", DataType{}, err
+			return "", nil, err
 		}
 	}
 	code := ""
 
 	// find sigs which match args
-	var returnType DataType
+	var returnType Type
 
 	matching := []*CallableInfo{}
 Loop:
 	for _, sig := range sigs {
-		if len(argTypes) == len(sig.ParamTypes) {
-			for j, paramType := range sig.ParamTypes {
-				if !isType(argTypes[j], paramType, ns, false) {
-					continue Loop
-				}
-			}
-			matching = append(matching, sig)
+		if len(argTypes) != len(sig.ParamTypes) {
+			continue
 		}
+		if op.StaticClass != sig.StaticClass {
+			continue
+		}
+		for j, paramType := range sig.ParamTypes {
+			if argTypes[j] != paramType {
+				continue Loop
+			}
+		}
+		matching = append(matching, sig)
 	}
 
 	if len(matching) == 0 {
@@ -159,7 +175,7 @@ Loop:
 		var err error
 		sig, err = ClosestMatchingSignature(matching, ns, op.Line, op.Column)
 		if err != nil {
-			return "", DataType{}, err
+			return "", nil, err
 		}
 	}
 
@@ -167,7 +183,11 @@ Loop:
 	if isMethod {
 		code += argCode[0] + "."
 	} else {
-		code += sig.Namespace + "." + FuncsClass + "."
+		if sig.StaticClass == "" {
+			code += sig.Namespace + "." + FuncsClass + "."
+		} else {
+			code += sig.Namespace + "." + sig.StaticClass + "."
+		}
 	}
 	code += op.Name + "("
 	for i, arg := range argCode {
@@ -181,74 +201,112 @@ Loop:
 		}
 	}
 	code += ")"
-	returnType = sig.ReturnType
+	returnType = sig.Return
 
 	return code, returnType, nil
 }
 
-func compileTypeCallForm(op TypeCallForm, ns *Namespace, expectedType DataType,
-	locals map[string]DataType) (code string, returnType DataType, err error) {
+func compileTypeCallForm(op TypeCallForm, ns *Namespace, expectedType Type,
+	locals map[ShortName]Type) (code string, returnType Type, err error) {
 	argCode := make([]string, len(op.Args))
-	argTypes := make([]DataType, len(op.Args))
+	argTypes := make([]Type, len(op.Args))
 	for i, expr := range op.Args {
 		var err error
-		argCode[i], argTypes[i], err = compileExpression(expr, ns, DataType{}, locals)
+		argCode[i], argTypes[i], err = compileExpression(expr, ns, nil, locals)
 		if err != nil {
-			return "", DataType{}, err
+			return "", nil, err
 		}
 	}
 	if isZeroType(op.Type) {
 		// should be impossible
-		return "", DataType{}, msg(op.Line, op.Column, "Compiling call form starting with zero type.")
-	} else if isType(op.Type, IntType, ns, true) {
+		return "", nil, msg(op.Line, op.Column, "Compiling call form starting with zero type.")
+	} else if op.Type == IntType {
 		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
 			err = msg(op.Line, op.Column, "Invalid cast to I.")
 			return
 		}
 
-	} else if isType(op.Type, LongIntType, ns, true) {
+	} else if op.Type == LongIntType {
 		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
 			err = msg(op.Line, op.Column, "Invalid cast to II.")
 			return
 		}
 
-	} else if isType(op.Type, FloatType, ns, true) {
+	} else if op.Type == FloatType {
 		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
 			err = msg(op.Line, op.Column, "Invalid cast to F.")
 			return
 		}
 
-	} else if isType(op.Type, DoubleType, ns, true) {
+	} else if op.Type == DoubleType {
 		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
 			err = msg(op.Line, op.Column, "Invalid cast to FF.")
 			return
 		}
 
-	} else if isType(op.Type, ByteType, ns, true) {
+	} else if op.Type == ByteType {
 		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
 			err = msg(op.Line, op.Column, "Invalid cast to B.")
 			return
 		}
 
-	} else if isType(op.Type, SignedByteType, ns, true) {
+	} else if op.Type == SignedByteType {
 		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
 			err = msg(op.Line, op.Column, "Invalid cast to SB.")
 			return
 		}
 
-	} else if isType(op.Type, BoolType, ns, true) {
+	} else if op.Type == BoolType {
 		if len(op.Args) != 1 || !isNumber(argTypes[0]) {
 			err = msg(op.Line, op.Column, "Invalid cast to Bool.")
 			return
 		}
 
-	} else if isType(op.Type, StrType, ns, true) {
+	} else if op.Type == StrType {
 		if len(op.Args) != 1 {
 			err = msg(op.Line, op.Column, "Invalid cast to Str.")
 			return
 		}
 		// if number, convert to string
 		// if class or struct type, call ToString
+	} else if isArray(op.Type) {
+		base, nDimensions := getArrayType(op.Type)
+		code, err = compileType(base, ns)
+		if err != nil {
+			return
+		}
+		code = "new " + code
+		if op.SizeFlag && nDimensions != len(op.Args) {
+			err = msg(op.Line, op.Column, "Wrong number of size arguments for array dimension.")
+			return
+		}
+		for i := 0; i < nDimensions; i++ {
+			if op.SizeFlag {
+				if !isInteger(argTypes[i]) {
+					err = msg(op.Line, op.Column, "Non-integer size argument for array dimension.")
+					return
+				}
+				code += "[" + argCode[i] + "]"
+			} else {
+				code += "[]"
+			}
+		}
+		if !op.SizeFlag {
+			code += "{"
+			arrayType := op.Type.TypeParams[0]
+			for i := 0; i < len(op.Args); i++ {
+				if !IsSubType(argTypes[i], arrayType) {
+					err = msg(op.Line, op.Column, "Array value is wrong type.")
+					return
+				}
+				code += argCode[i]
+				if i < len(op.Args)-1 {
+					code += ", "
+				}
+			}
+			code += "}"
+		}
+		returnType = op.Type
 	} else {
 		fullName := ns.FullNames[op.Type.Name]
 		constructorSigs := ns.Constructors[fullName]
@@ -259,7 +317,7 @@ func compileTypeCallForm(op TypeCallForm, ns *Namespace, expectedType DataType,
 			for i, sig := range constructorSigs {
 				if len(argTypes) == len(sig.ParamTypes) {
 					for j, paramType := range sig.ParamTypes {
-						if !isType(argTypes[j], paramType, ns, false) {
+						if !IsSubType(argTypes[j], paramType) {
 							continue Loop
 						}
 					}
@@ -267,7 +325,7 @@ func compileTypeCallForm(op TypeCallForm, ns *Namespace, expectedType DataType,
 				}
 			}
 			if len(matching) > 1 {
-				return "", DataType{}, msg(op.Line, op.Column, "Constructor call is ambiguous (multiple matching methods or functions).")
+				return "", nil, msg(op.Line, op.Column, "Constructor call is ambiguous (multiple matching methods or functions).")
 			} else if len(matching) == 1 {
 				sig := constructorSigs[matching[0]]
 				code += "new " + op.Type.CSName(ns) + "("
@@ -279,8 +337,10 @@ func compileTypeCallForm(op TypeCallForm, ns *Namespace, expectedType DataType,
 					}
 				}
 				code += ")"
-				returnType = sig.ReturnType
+				returnType = sig.Return
 			}
+		} else {
+			return "", nil, msg(op.Line, op.Column, "Constructor call matches no known type.")
 		}
 	}
 	return

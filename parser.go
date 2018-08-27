@@ -201,7 +201,7 @@ func parseStruct(parens ParenList, annotations []AnnotationForm, isClass bool) (
 			}
 		}
 	}
-	dataType, err := parseDataType(elems[idx])
+	dataType, err := parseTypeAtom(elems[idx])
 	if err != nil {
 		return StructDef{}, errors.New(strings.Title(structOrClass) + " has invalid name: " + err.Error())
 	}
@@ -217,7 +217,7 @@ func parseStruct(parens ParenList, annotations []AnnotationForm, isClass bool) (
 				if idx >= len(elems) {
 					break
 				}
-				dt, err := parseDataType(elems[idx])
+				dt, err := parseTypeAtom(elems[idx])
 				if err != nil {
 					break
 				}
@@ -299,37 +299,45 @@ func parseField(parens ParenList, annotations []AnnotationForm) (FieldDef, error
 		Annotations: annotations,
 	}
 	atoms := parens.Atoms
-	if len(atoms) < 3 {
-		return FieldDef{}, errors.New("Invalid field: " + spew.Sdump(parens))
+	idx := 1
+	if idx >= len(atoms) {
+		return FieldDef{}, errors.New("Expecting field name: " + spew.Sdump(parens))
 	}
-	symbol, ok := atoms[1].(Symbol)
+	symbol, ok := atoms[idx].(Symbol)
 	if !ok {
 		return FieldDef{}, errors.New("Expecting field name: " + spew.Sdump(parens))
 	}
 	field.Name = symbol.Content
-	DataType, err := parseDataType(atoms[2])
+	idx++
+	if idx >= len(atoms) {
+		return FieldDef{}, errors.New("Expecting field type: " + spew.Sdump(parens))
+	}
+	dataType, err := parseTypeAtom(atoms[idx])
 	if err != nil {
 		return FieldDef{}, err
 	}
-	field.Type = DataType
-	if len(atoms) == 4 {
-		expr, err := parseExpression(atoms[3])
+	field.Type = dataType
+	idx++
+	if idx < len(atoms) {
+		expr, err := parseExpression(atoms[idx])
 		if err != nil {
 			return FieldDef{}, err
 		}
 		field.Value = expr
-	} else if len(atoms) > 4 {
-		return FieldDef{}, errors.New("Too many atoms in field: " + spew.Sdump(parens))
+		idx++
+		if idx < len(atoms) {
+			return FieldDef{}, errors.New("Too many atoms in field: " + spew.Sdump(parens))
+		}
 	}
 	return field, nil
 }
 
-func parseDataType(atom Atom) (DataType, error) {
-	dataType := DataType{}
+func parseTypeAtom(atom Atom) (TypeAtom, error) {
+	dataType := TypeAtom{}
 	switch atom := atom.(type) {
 	case Symbol:
 		if atom.Content != strings.Title(atom.Content) {
-			return DataType{}, errors.New("Type name must begin with capital letter")
+			return TypeAtom{}, errors.New("Type name must begin with capital letter")
 		}
 		dataType.Name = atom.Content
 		dataType.Line = atom.Line
@@ -337,28 +345,28 @@ func parseDataType(atom Atom) (DataType, error) {
 	case AtomChain:
 		atoms := atom.Atoms
 		if len(atoms) < 1 {
-			return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+			return TypeAtom{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 		}
 		if symbol, ok := atoms[0].(Symbol); ok {
 			if symbol.Content != strings.Title(symbol.Content) {
-				return DataType{}, errors.New("Type name must begin with capital letter")
+				return TypeAtom{}, errors.New("Type name must begin with capital letter")
 			}
 			dataType.Name = symbol.Content
 		}
 		if len(atoms) < 2 {
-			return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+			return TypeAtom{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 		}
 		switch second := atoms[1].(type) {
 		case AngleList:
 			angleAtoms := second.Atoms
 			if len(angleAtoms) == 0 {
-				return DataType{}, errors.New("Invalid type spec (empty angle brackets): " + spew.Sdump(atom))
+				return TypeAtom{}, errors.New("Invalid type spec (empty angle brackets): " + spew.Sdump(atom))
 			}
-			dataType.TypeParams = []DataType{}
+			dataType.TypeParams = []TypeAtom{}
 			for _, typeAtom := range angleAtoms {
-				ts, err := parseDataType(typeAtom)
+				ts, err := parseTypeAtom(typeAtom)
 				if err != nil {
-					return DataType{}, err
+					return TypeAtom{}, err
 				}
 				dataType.TypeParams = append(dataType.TypeParams, ts)
 			}
@@ -367,20 +375,45 @@ func parseDataType(atom Atom) (DataType, error) {
 			}
 			namespace, err := parseNamespace(atoms[2:], atom.Line, atom.Column)
 			if err != nil {
-				return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+				return TypeAtom{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 			}
 			dataType.Namespace = namespace
 		case SigilAtom:
 			namespace, err := parseNamespace(atoms[1:], atom.Line, atom.Column)
 			if err != nil {
-				return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+				return TypeAtom{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 			}
 			dataType.Namespace = namespace
 		default:
-			return DataType{}, errors.New("Improperly formed data type name: " + spew.Sdump(atom))
+			return TypeAtom{}, errors.New("Improperly formed data type name: " + spew.Sdump(atom))
 		}
 	default:
-		return DataType{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+		return TypeAtom{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
+	}
+	// translate AA and AAA into A<A<>> and A<A<A<>>>
+	if dataType.Name == "AA" && dataType.Namespace == "" {
+		dataType.Name = "A"
+		dataType = TypeAtom{
+			Name:       "A",
+			Line:       dataType.Line,
+			Column:     dataType.Column,
+			TypeParams: []TypeAtom{dataType},
+		}
+	}
+	if dataType.Name == "AAA" && dataType.Namespace == "" {
+		dataType.Name = "A"
+		dataType = TypeAtom{
+			Name:       "A",
+			Line:       dataType.Line,
+			Column:     dataType.Column,
+			TypeParams: []TypeAtom{dataType},
+		}
+		dataType = TypeAtom{
+			Name:       "A",
+			Line:       dataType.Line,
+			Column:     dataType.Column,
+			TypeParams: []TypeAtom{dataType},
+		}
 	}
 	return dataType, nil
 }
@@ -630,8 +663,25 @@ func parseExpression(atom Atom) (Expression, error) {
 		if len(atoms) == 0 {
 			return nil, errors.New("Invalid expression (empty parens): " + spew.Sdump(atom))
 		}
-		args := make([]Expression, len(atoms)-1)
-		for i, a := range atoms[1:] {
+		idx := 1
+		staticClass := ""
+		if idx < len(atoms) {
+			if symbol, ok := atoms[idx].(Symbol); ok {
+				if symbol.Content == strings.Title(symbol.Content) {
+					staticClass = symbol.Content
+					idx++
+				}
+			}
+		}
+		sizeFlag := false
+		if idx < len(atoms) {
+			if parseFlag(atoms[idx], "size") {
+				sizeFlag = true
+				idx++
+			}
+		}
+		args := make([]Expression, len(atoms)-idx)
+		for i, a := range atoms[idx:] {
 			expr, err := parseExpression(a)
 			if err != nil {
 				return nil, err
@@ -640,29 +690,46 @@ func parseExpression(atom Atom) (Expression, error) {
 		}
 		varExpr, err := parseVarExpression(atoms[0])
 		if err != nil {
-			dt, err := parseDataType(atoms[0])
+			dt, err := parseTypeAtom(atoms[0])
 			if err != nil {
 				return nil, errors.New("Invalid expression (expecting name or type): " + spew.Sdump(atom))
 			}
 			expr = TypeCallForm{
-				Line:   atom.Line,
-				Column: atom.Column,
-				Type:   dt,
-				Args:   args,
+				Line:     atom.Line,
+				Column:   atom.Column,
+				Type:     dt,
+				SizeFlag: sizeFlag,
+				Args:     args,
 			}
 		} else {
 			expr = CallForm{
-				Line:      atom.Line,
-				Column:    atom.Column,
-				Name:      varExpr.Name,
-				Namespace: varExpr.Namespace,
-				Args:      args,
+				Line:        atom.Line,
+				Column:      atom.Column,
+				Name:        varExpr.Name,
+				Namespace:   varExpr.Namespace,
+				StaticClass: staticClass,
+				Args:        args,
 			}
 		}
 	default:
 		return nil, errors.New("Invalid expression: " + spew.Sdump(atom))
 	}
 	return expr, nil
+}
+
+func parseFlag(atom Atom, expected string) bool {
+	if chain, ok := atom.(AtomChain); ok {
+		if len(chain.Atoms) == 2 {
+			if sigil, ok := chain.Atoms[0].(SigilAtom); ok {
+				if sigil.Content == "-" {
+					if symbol, ok := chain.Atoms[1].(Symbol); ok {
+						return symbol.Content == expected
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, error) {
@@ -672,25 +739,26 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 		Annotations: annotations,
 	}
 	atoms := parens.Atoms
-	if len(atoms) < 2 {
+	idx := 1
+	if idx >= len(atoms) {
 		return MethodDef{}, errors.New("Invalid method definition: " + spew.Sdump(parens))
 	}
-	if symbol, ok := atoms[1].(Symbol); ok {
+	if symbol, ok := atoms[idx].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
 			return MethodDef{}, errors.New("Invalid method name (cannot begin with uppercase): " + spew.Sdump(symbol))
 		}
 		methodDef.Name = symbol.Content
 	}
-	if len(atoms) < 3 {
-		return methodDef, nil
+	idx++
+	if idx >= len(atoms) {
+		return MethodDef{}, errors.New("Incomplete method definition: " + spew.Sdump(parens))
 	}
-	idx := 2
-	dt, err := parseDataType(atoms[idx])
+	dt, err := parseTypeAtom(atoms[idx])
 	if err == nil {
-		methodDef.ReturnType = dt
+		methodDef.Return = dt
 		idx++
 	}
-	if len(atoms) <= idx {
+	if idx >= len(atoms) {
 		return MethodDef{}, errors.New("Incomplete method definition: " + spew.Sdump(parens))
 	}
 	// params
@@ -700,13 +768,13 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 		}
 		idx++
 		paramNames := []string{}
-		paramTypes := []DataType{}
+		paramTypes := []TypeAtom{}
 		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
 			}
-			dt, err := parseDataType(atoms[idx+1])
+			dt, err := parseTypeAtom(atoms[idx+1])
 			if err != nil {
 				return MethodDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
@@ -788,13 +856,13 @@ func parseConstructor(parens ParenList, annotations []AnnotationForm) (Construct
 		}
 		idx++
 		paramNames := []string{}
-		paramTypes := []DataType{}
+		paramTypes := []TypeAtom{}
 		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
 			}
-			dt, err := parseDataType(atoms[idx+1])
+			dt, err := parseTypeAtom(atoms[idx+1])
 			if err != nil {
 				return ConstructorDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
@@ -821,25 +889,40 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 		Annotations: annotations,
 	}
 	atoms := parens.Atoms
-	if len(atoms) < 2 {
+	idx := 1
+	if idx >= len(atoms) {
 		return FuncDef{}, errors.New("Invalid function definition: " + spew.Sdump(parens))
 	}
-	if symbol, ok := atoms[1].(Symbol); ok {
+	if parseFlag(atoms[idx], "static") {
+		idx++
+		if symbol, ok := atoms[idx].(Symbol); ok {
+			if symbol.Content != strings.Title(symbol.Content) {
+				return FuncDef{}, errors.New("Invalid class name for static function (must begin with uppercase letter)." + spew.Sdump(parens))
+			}
+			funcDef.StaticClass = symbol.Content
+		} else {
+			return FuncDef{}, errors.New("Expecting class name for static function." + spew.Sdump(parens))
+		}
+		idx++
+	}
+	if symbol, ok := atoms[idx].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
 			return FuncDef{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(parens))
 		}
 		funcDef.Name = symbol.Content
+	} else {
+		return FuncDef{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(parens))
 	}
-	if len(atoms) < 3 {
+	idx++
+	if idx >= len(atoms) {
 		return funcDef, nil
 	}
-	idx := 2
-	dt, err := parseDataType(atoms[idx])
+	dt, err := parseTypeAtom(atoms[idx])
 	if err == nil {
-		funcDef.ReturnType = dt
+		funcDef.Return = dt
 		idx++
 	}
-	if len(atoms) <= idx {
+	if idx >= len(atoms) {
 		return FuncDef{}, errors.New("Incomplete function definition: " + spew.Sdump(parens))
 	}
 	// params
@@ -849,13 +932,13 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 		}
 		idx++
 		paramNames := []string{}
-		paramTypes := []DataType{}
+		paramTypes := []TypeAtom{}
 		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
 			if !ok {
 				break
 			}
-			dt, err := parseDataType(atoms[idx+1])
+			dt, err := parseTypeAtom(atoms[idx+1])
 			if err != nil {
 				return FuncDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
@@ -1168,7 +1251,7 @@ func parseVar(atoms []Atom, line int, column int) (VarForm, error) {
 	}
 	var errType error
 	var errVal error
-	varForm.Type, errType = parseDataType(atoms[2])
+	varForm.Type, errType = parseTypeAtom(atoms[2])
 	varForm.Value, errVal = parseExpression(atoms[valIdx])
 	if len(atoms) == 3 {
 		if errType != nil && errVal != nil {
@@ -1276,11 +1359,11 @@ Loop:
 			if len(elems) < 2 {
 				return TryForm{}, 0, errors.New("Invalid catch clause (expecting type): " + spew.Sdump(elems))
 			}
-			DataType, err := parseDataType(elems[1])
+			TypeAtom, err := parseTypeAtom(elems[1])
 			if err != nil {
 				return TryForm{}, 0, err
 			}
-			tryForm.CatchTypes = append(tryForm.CatchTypes, DataType)
+			tryForm.CatchTypes = append(tryForm.CatchTypes, TypeAtom)
 			body, err := parseBody(elems[2:])
 			if err != nil {
 				return TryForm{}, 0, err
@@ -1308,26 +1391,46 @@ func parseGlobal(parens ParenList, annotations []AnnotationForm) (GlobalDef, err
 		Annotations: annotations,
 	}
 	atoms := parens.Atoms
-	if len(atoms) < 3 {
+	idx := 1
+	if parseFlag(atoms[idx], "static") {
+		idx++
+		if symbol, ok := atoms[idx].(Symbol); ok {
+			if symbol.Content != strings.Title(symbol.Content) {
+				return GlobalDef{}, errors.New("Invalid class name for static global (must begin with uppercase letter)." + spew.Sdump(parens))
+			}
+			globalDef.StaticClass = symbol.Content
+		} else {
+			return GlobalDef{}, errors.New("Expecting class name for static global." + spew.Sdump(parens))
+		}
+		idx++
+	}
+	if idx >= len(atoms) {
 		return GlobalDef{}, errors.New("Invalid global: " + spew.Sdump(parens))
 	}
-	symbol, ok := atoms[1].(Symbol)
+	symbol, ok := atoms[idx].(Symbol)
 	if !ok {
 		return GlobalDef{}, errors.New("Expecting global name: " + spew.Sdump(parens))
 	}
 	globalDef.Name = symbol.Content
-	DataType, err := parseDataType(atoms[2])
+	idx++
+	if idx >= len(atoms) {
+		return GlobalDef{}, errors.New("Invalid global: " + spew.Sdump(parens))
+	}
+	dataType, err := parseTypeAtom(atoms[idx])
 	if err != nil {
 		return GlobalDef{}, err
 	}
-	globalDef.Type = DataType
-	if len(atoms) == 4 {
-		expr, err := parseExpression(atoms[3])
+	globalDef.Type = dataType
+	idx++
+	if idx < len(atoms) {
+		expr, err := parseExpression(atoms[idx])
 		if err != nil {
 			return GlobalDef{}, err
 		}
 		globalDef.Value = expr
-	} else if len(atoms) > 4 {
+		idx++
+	}
+	if idx < len(atoms) {
 		return GlobalDef{}, errors.New("Too many atoms in global: " + spew.Sdump(parens))
 	}
 	return globalDef, nil
@@ -1360,7 +1463,7 @@ func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDe
 			}
 		}
 	}
-	dataType, err := parseDataType(elems[idx])
+	dataType, err := parseTypeAtom(elems[idx])
 	if err != nil {
 		return InterfaceDef{}, errors.New("Interface has invalid name: " + err.Error())
 	}
@@ -1393,11 +1496,11 @@ func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDe
 	return interfaceDef, nil
 }
 
-func parseMethodSignature(parens ParenList) (paramTypes []DataType, returnType DataType, name string, err error) {
-	paramTypes = []DataType{}
+func parseMethodSignature(parens ParenList) (paramTypes []TypeAtom, returnType TypeAtom, name string, err error) {
+	paramTypes = []TypeAtom{}
 	atoms := parens.Atoms
 	if len(atoms) < 2 {
-		return nil, DataType{}, "", errors.New("Invalid method signature: " + spew.Sdump(parens))
+		return nil, TypeAtom{}, "", errors.New("Invalid method signature: " + spew.Sdump(parens))
 	}
 	if symbol, ok := atoms[1].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
@@ -1410,7 +1513,7 @@ func parseMethodSignature(parens ParenList) (paramTypes []DataType, returnType D
 		return
 	}
 	idx := 2
-	dataType, err := parseDataType(atoms[idx])
+	dataType, err := parseTypeAtom(atoms[idx])
 	if err == nil {
 		returnType = dataType
 		idx++
@@ -1428,9 +1531,9 @@ func parseMethodSignature(parens ParenList) (paramTypes []DataType, returnType D
 		}
 		idx++
 		for _, atom := range atoms[idx:] {
-			dataType, err := parseDataType(atom)
+			dataType, err := parseTypeAtom(atom)
 			if err != nil {
-				return nil, DataType{}, "", errors.New("Invalid parameter type: " + spew.Sdump(atom))
+				return nil, TypeAtom{}, "", errors.New("Invalid parameter type: " + spew.Sdump(atom))
 			}
 			paramTypes = append(paramTypes, dataType)
 		}

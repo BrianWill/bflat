@@ -1,13 +1,20 @@
 namespace example {
 
-public class _Globals {}
+public class _Globals {
+	public string evan = "hi";
+}
 
 public class _Funcs {
 	public static void main() {
 		int _i = 3;
+		int[] _arr;
+		_arr = new int[(5 + 2)];
+		_i = _arr[(4 + _i)];
+		_arr[(4 + _i)] = 8;
+		Bar[] _monkeys = new Bar[]{new example.Monkey(), new example.Monkey()};
 		_i = (5 + 3);
 		otherspace._Funcs.tracy();
-		_i = example._Funcs.kevin(2);
+		_i = otherspace.Roger.ian(2);
 	}
 	public static int kevin(_a int) {
 		return (_a + 4);

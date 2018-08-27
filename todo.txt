@@ -14,27 +14,22 @@
 - properties
 
 
-- importing bflat
+- static methods and fields
 
-- importing csharp
+    todo: should account for namespace of classes
 
-
-- arrays
 
 - generics
 
 
+
+- indexer methods
 
 (ns red.orange.blue)      // 'blue' is the short name; (in C#, equivalent of Red.Orange.Blue) 
 
                           // file convention: shortname_file.bf
                           // e.g. file 'foo' in namespace with shortname 'bar':
                           //            bar_foo.bf
-
-                          // the containing directory should be named 'red.orange' or 'red.orange.blue'
-
-                          // the existence of directory 'a.b.c' doesn't necessarily imply existence of 'a.b', 
-                          // but if they both exist, then 'a.b.c' should be directly inside 'a.b'
 
 
 

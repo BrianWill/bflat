@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 type Token struct {
@@ -146,8 +147,9 @@ type Statement interface {
 type GlobalDef struct {
 	Line        int
 	Column      int
-	Name        string
-	Type        DataType
+	Name        ShortName
+	StaticClass string
+	Type        TypeAtom
 	Value       Expression
 	Annotations []AnnotationForm
 }
@@ -155,8 +157,8 @@ type GlobalDef struct {
 type ImportDef struct {
 	Line        int
 	Column      int
-	Namespace   string
-	Shortname   string
+	Namespace   NSNameFull
+	Shortname   NSNameShort
 	Exclusions  []string
 	Aliases     map[string]string
 	Annotations []AnnotationForm
@@ -165,8 +167,8 @@ type ImportDef struct {
 type NamespaceDef struct {
 	Line        int
 	Column      int
-	Name        string
-	Shortname   string // for namespace names with dots, the part after the last dot
+	Name        NSNameFull
+	Shortname   NSNameShort
 	Annotations []AnnotationForm
 }
 
@@ -174,9 +176,10 @@ type FuncDef struct {
 	Line        int
 	Column      int
 	Name        string
-	ParamTypes  []DataType
+	StaticClass string
+	ParamTypes  []TypeAtom
 	ParamNames  []string
-	ReturnType  DataType
+	Return      TypeAtom
 	Body        []Statement
 	Annotations []AnnotationForm
 }
@@ -184,9 +187,9 @@ type FuncDef struct {
 type ClassDef struct {
 	Line         int
 	Column       int
-	Type         DataType
+	Type         TypeAtom
 	AccessLevel  AccessLevel
-	Supertypes   []DataType
+	Supertypes   []TypeAtom
 	Fields       []FieldDef
 	Methods      []MethodDef
 	Constructors []ConstructorDef
@@ -195,51 +198,64 @@ type ClassDef struct {
 }
 
 type ClassInfo struct {
-	Name           string
-	Namespace      string
-	ShortNamespace string
-	Parent         *ClassInfo
-	Fields         map[string]FieldInfo
-	Interfaces     []*InterfaceInfo
+	Name       ShortName
+	Namespace  *Namespace
+	Parent     *ClassInfo
+	Fields     map[ShortName]FieldInfo
+	Methods    map[ShortName][]*CallableInfo
+	Interfaces []*InterfaceInfo
+	Params     []Type
 }
 
 type StructInfo struct {
-	Name           string
-	Namespace      string
-	ShortNamespace string
-	Fields         map[string]FieldInfo
-	Interfaces     []*InterfaceInfo
+	Name       ShortName
+	Namespace  *Namespace
+	Fields     map[ShortName]FieldInfo
+	Methods    map[ShortName][]*CallableInfo
+	Interfaces []*InterfaceInfo
+	Params     []Type
 }
 
 type InterfaceInfo struct {
-	Name           string
-	Namespace      string
-	ShortNamespace string
-	Parents        []*InterfaceInfo
-	Signatures     map[string]SignatureInfo
-}
-
-type IsImplementor interface {
-	IsImplementor(*InterfaceInfo) bool
+	Name      ShortName
+	Namespace *Namespace
+	Parents   []*InterfaceInfo
+	Methods   map[ShortName]*CallableInfo
+	Params    []Type
 }
 
 type GlobalInfo struct {
-	Name           string
-	Namespace      string
-	ShortNamespace string
+	Name      ShortName
+	Namespace *Namespace
+	Type      Type
 }
 
-type SignatureInfo struct {
-	ParamTypes []DataType
-	ReturnType DataType
+// nil used to represent void or absence of type
+type Type interface {
+	Type() // do-nothing marker method
 }
+
+type BuiltinType struct {
+	Name ShortName
+}
+
+type ArrayType struct {
+	BaseType Type
+}
+
+func (t *ClassInfo) Type()     {}
+func (t *StructInfo) Type()    {}
+func (t *InterfaceInfo) Type() {}
+func (t ArrayType) Type()      {}
+func (t BuiltinType) Type()    {}
 
 type CallableInfo struct {
-	IsMethod   bool
-	Namespace  string
-	ParamNames []string
-	ParamTypes []DataType
-	ReturnType DataType
+	IsMethod    bool
+	Namespace   *Namespace
+	ParamNames  []string
+	ParamTypes  []Type
+	Return      Type
+	StaticClass string // class to which this static function belongs ()
 }
 
 type Expression interface {
@@ -255,25 +271,27 @@ type IndexingForm struct {
 }
 
 type CallForm struct {
-	Line      int
-	Column    int
-	Name      string
-	Namespace string
-	Args      []Expression
+	Line        int
+	Column      int
+	Name        string
+	Namespace   string
+	StaticClass string
+	Args        []Expression
 }
 
 type TypeCallForm struct {
-	Line   int
-	Column int
-	Type   DataType
-	Args   []Expression
+	Line     int
+	Column   int
+	Type     TypeAtom
+	SizeFlag bool
+	Args     []Expression
 }
 
 type VarExpression struct {
 	Line      int
 	Column    int
-	Name      string
-	Namespace string
+	Name      ShortName
+	Namespace NSNameShort
 }
 
 func (a VarExpression) Expression()    {}
@@ -282,12 +300,12 @@ func (a StringAtom) Expression()       {}
 func (a IndexingForm) Expression()     {}
 func (a CallForm) Expression()         {}
 func (a TypeCallForm) Expression()     {}
-func (a DataType) Expression()         {}
+func (a TypeAtom) Expression()         {}
 
-func (a DataType) GetLine() int {
+func (a TypeAtom) GetLine() int {
 	return a.Line
 }
-func (a DataType) GetColumn() int {
+func (a TypeAtom) GetColumn() int {
 	return a.Column
 }
 
@@ -424,17 +442,17 @@ type TryForm struct {
 	Line        int
 	Column      int
 	Body        []Statement
-	CatchTypes  []DataType // CaseValues and Casebodies are parallel
+	CatchTypes  []Type // CaseValues and Casebodies are parallel
 	CatchBodies [][]Statement
 	FinallyBody []Statement
 }
 
-type DataType struct {
-	Line       int
-	Column     int
-	Name       string
-	TypeParams []DataType
-	Namespace  string
+type TypeAtom struct {
+	Line      int
+	Column    int
+	Name      ShortName
+	Namespace NSNameShort
+	Params    []TypeAtom
 }
 
 type Target interface {
@@ -486,41 +504,41 @@ type VarForm struct {
 	Line   int
 	Column int
 	Target string
-	Type   DataType
+	Type   Type
 	Value  Expression
 }
 
 type AnnotationForm struct {
 	Line      int
 	Column    int
-	Name      string
+	Name      ShortName
 	Class     string
-	Namespace []string
+	Namespace NSNameShort
 	Args      []Expression
 }
 
 type FieldDef struct {
 	Line        int
 	Column      int
-	Name        string
-	Type        DataType
+	Name        ShortName
+	Type        TypeAtom
 	AccessLevel AccessLevel
 	Annotations []AnnotationForm
 	Value       Expression
 }
 
 type FieldInfo struct {
-	Name        string
-	Type        DataType
+	Name        ShortName
+	Type        Type
 	AccessLevel AccessLevel
 }
 
 type StructDef struct {
 	Line         int
 	Column       int
-	Type         DataType
+	Type         Type
 	AccessLevel  AccessLevel
-	Interfaces   []DataType
+	Interfaces   []TypeAtom
 	Fields       []FieldDef
 	Methods      []MethodDef
 	Constructors []ConstructorDef
@@ -531,12 +549,12 @@ type StructDef struct {
 type InterfaceDef struct {
 	Line              int
 	Column            int
-	Type              DataType
+	Type              TypeAtom
 	AccessLevel       AccessLevel
-	ParentInterfaces  []DataType
-	MethodNames       []string
-	MethodParams      [][]DataType
-	MethodReturnTypes []DataType
+	ParentInterfaces  []TypeAtom
+	MethodNames       []ShortName
+	MethodParams      [][]TypeAtom
+	MethodReturnTypes []TypeAtom
 	MethodAnnotations [][]AnnotationForm
 	Annotations       []AnnotationForm
 }
@@ -544,10 +562,10 @@ type InterfaceDef struct {
 type MethodDef struct {
 	Line        int
 	Column      int
-	Name        string
-	ParamTypes  []DataType
+	Name        ShortName
+	ParamTypes  []TypeAtom
 	ParamNames  []string
-	ReturnType  DataType
+	Return      TypeAtom
 	Body        []Statement
 	Annotations []AnnotationForm
 }
@@ -555,7 +573,7 @@ type MethodDef struct {
 type ConstructorDef struct {
 	Line        int
 	Column      int
-	ParamTypes  []DataType
+	ParamTypes  []TypeAtom
 	ParamNames  []string
 	Body        []Statement
 	Annotations []AnnotationForm
@@ -564,8 +582,8 @@ type ConstructorDef struct {
 type PropertyDef struct {
 	Line        int
 	Column      int
-	Name        string
-	Type        DataType
+	Name        ShortName
+	Type        TypeAtom
 	GetBody     []Statement
 	SetBody     []Statement
 	Annotations []AnnotationForm
@@ -669,16 +687,24 @@ type TopDefs struct {
 const GlobalsClass = "_Globals"
 const FuncsClass = "_Funcs"
 
+type NSNameFull string
+type NSNameShort string // for namespace names with dots, the part after the last dot (otherwise same as NSNameFull)
+type NSNameCS string
+type ShortName string // unqualified name
+
 type Namespace struct {
-	Name         string
-	Classes      map[string]*ClassInfo
-	Structs      map[string]*StructInfo
-	Interfaces   map[string]*InterfaceInfo
-	Constructors map[string][]*CallableInfo
-	Funcs        map[string][]*CallableInfo
-	Methods      map[string][]*CallableInfo
-	Globals      map[string]*GlobalInfo
-	FullNames    map[string]string // unqualifieid name -> fully qualified name
+	Name      NSNameFull
+	Shortname NSNameShort
+	CSName    NSNameCS
+	Imported  map[NSNameShort]*Namespace
+
+	Classes      map[ShortName]*ClassInfo
+	Structs      map[ShortName]*StructInfo
+	Interfaces   map[ShortName]*InterfaceInfo
+	Constructors map[ShortName][]*CallableInfo
+	Globals      map[ShortName]*GlobalInfo
+	Funcs        map[ShortName][]*CallableInfo
+	Methods      map[ShortName][]*CallableInfo
 }
 
 type TypeInfo interface {
@@ -689,35 +715,41 @@ func (a *ClassInfo) TypeInfo()     {}
 func (a *StructInfo) TypeInfo()    {}
 func (a *InterfaceInfo) TypeInfo() {}
 
-var StrType = DataType{
+const StrLengthWord = "len"
+
+var AnyType = BuiltinType{
+	Name: "Any",
+}
+
+var StrType = BuiltinType{
 	Name: "Str",
 }
 
-var BoolType = DataType{
+var BoolType = BuiltinType{
 	Name: "Bool",
 }
 
-var IntType = DataType{
+var IntType = BuiltinType{
 	Name: "I",
 }
 
-var LongIntType = DataType{
+var LongType = BuiltinType{
 	Name: "II",
 }
 
-var FloatType = DataType{
+var FloatType = BuiltinType{
 	Name: "F",
 }
 
-var DoubleType = DataType{
+var DoubleType = BuiltinType{
 	Name: "FF",
 }
 
-var ByteType = DataType{
+var ByteType = BuiltinType{
 	Name: "B",
 }
 
-var SignedByteType = DataType{
+var SignedByteType = BuiltinType{
 	Name: "SB",
 }
 
@@ -766,11 +798,15 @@ func main() {
 		}
 	}
 
+	start := time.Now()
+
 	err := compileNamespace(namespace, directory, map[string]*Namespace{})
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
+	debug("Time: ", time.Since(start))
 }
 
 // within a base directory, get all the source files mapped to their namespace

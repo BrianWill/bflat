@@ -3,17 +3,32 @@
 
 (import otherspace)
 
+(global -static Harry evan Str `hi`)
+
+(global steven Str `hi`)
+
 (func main
     (var i 3)
+    (var arr A<I>)
+    (var s Str steven)
+    (as arr (A<I> -size (add 5 2)))
+    (as i [(add 4 i) arr])
+    (as [(add 4 i) arr] 8)
+    (var monkeys (A<Bar> (Monkey) (Monkey)))
     (as i (add 5 3))
     (tracy)
-    (as i (kevin 2)))
+    (as i (ian Roger 2)))
 
 
-(func kevin I : a I
+
+(func -static Harry kevin I : a I
     (return (add a 4)))
 
-(class Foo
+(class Foo 
+//    -where T -class IAlice 
+//    -where X -struct ISomething
+//    -where Z -new ISomething
+
     (f alice I 24)
 
     (m bar F : a I c I
