@@ -336,17 +336,13 @@ func compileGlobals(globals []GlobalDef, ns *Namespace, indent string) (string, 
 	code := "public class " + GlobalsClass + " {\n"
 	for _, g := range globals {
 		globalInfo := ns.Globals[g.Name]
-		c, err := compileType(g.Type)
-		if err != nil {
-			return "", err
-		}
-		code += indent + "public " + c + " " + g.Name
+		code += indent + "public " + compileType(globalInfo.Type) + " " + string(g.Name)
 		if g.Value != nil {
-			c, returnedType, err := compileExpression(g.Value, ns, g.Type, map[ShortName]Type{})
+			c, returnedType, err := compileExpression(g.Value, ns, globalInfo.Type, map[ShortName]Type{})
 			if err != nil {
 				return "", err
 			}
-			if !IsSubType(returnedType, g.Type) {
+			if !IsSubType(returnedType, globalInfo.Type) {
 				return "", msg(g.Line, g.Column, "Initial value of global does not match the declared type.")
 			}
 			code += " = " + c
@@ -361,32 +357,33 @@ func compileGlobals(globals []GlobalDef, ns *Namespace, indent string) (string, 
 func compileType(t Type) string {
 	switch t := t.(type) {
 	case *ClassInfo:
-		return string(t.Namespace.CSName) + "." + string(t.ShortName)
+		return string(t.Namespace.CSName) + "." + string(t.Name)
 	case *StructInfo:
-		return string(t.Namespace.CSName) + "." + string(t.ShortName)
+		return string(t.Namespace.CSName) + "." + string(t.Name)
 	case *InterfaceInfo:
-		return string(t.Namespace.CSName) + "." + string(t.ShortName)
+		return string(t.Namespace.CSName) + "." + string(t.Name)
 	case ArrayType:
-		c, err := compileType(t.BaseType)
-		return c + "[]"
+		return compileType(t.BaseType) + "[]"
 	case BuiltinType:
 		switch t.Name {
 		case "I":
-			return "int", nil
+			return "int"
 		case "F":
-			return "float", nil
+			return "float"
 		case "B":
-			return "byte", nil
+			return "byte"
 		case "SB":
-			return "sbyte", nil
+			return "sbyte"
 		case "Bool":
-			return "bool", nil
+			return "bool"
 		case "Str":
-			return "string", nil
+			return "string"
 		case "Any":
-			return "object", nil
+			return "object"
 		}
 	}
+	panic("should never reach here")
+	return ""
 }
 
 func compileIfForm(s IfForm, returnType Type,
@@ -469,41 +466,39 @@ func compileBody(statements []Statement, returnType Type,
 			c, _, err = compileCallForm(f, ns, nil, locals)
 			c = indent + c + ";\n"
 		case VarForm:
-			if locals[f.Target].Name != "" {
+			if locals[f.Target] != nil {
 				return "", msg(f.Line, f.Column, "Local variable of same name already exists in this scope.")
 			}
 			typeStr := "var"
-			if f.Type.Name != "" {
-				typeStr, err = compileType(f.Type, ns)
-				if err != nil {
-					return "", err
-				}
+			t := ns.GetType(f.Type.Name, f.Type.Namespace)
+			if t == nil {
+				return "", msg(f.Line, f.Column, "Var form specifies unknown type.")
+			}
+			if t != nil {
+				typeStr = compileType(t)
 			}
 			valStr := ""
-			var exprType DataType
+			var exprType Type
 			if f.Value != nil {
-				valStr, exprType, err = compileExpression(f.Value, ns, f.Type, locals)
+				valStr, exprType, err = compileExpression(f.Value, ns, t, locals)
 				if err != nil {
 					return "", err
 				}
-				if isZeroType(f.Type) {
-					typeStr, err = compileType(exprType, ns)
-					if err != nil {
-						return "", err
-					}
-				} else if !IsSubType(exprType, f.Type) {
+				if t == nil {
+					typeStr = compileType(exprType)
+				} else if !IsSubType(exprType, t) {
 					return "", msg(f.Line, f.Column, "Initial value in var statement is wrong type.")
 				}
 			}
 			if valStr == "" {
-				c = indent + typeStr + " _" + f.Target + ";\n"
+				c = indent + typeStr + " _" + string(f.Target) + ";\n"
 			} else {
-				c = indent + typeStr + " _" + f.Target + " = " + valStr + ";\n"
+				c = indent + typeStr + " _" + string(f.Target) + " = " + valStr + ";\n"
 			}
-			if isZeroType(f.Type) {
+			if t == nil {
 				locals[f.Target] = exprType
 			} else {
-				locals[f.Target] = f.Type
+				locals[f.Target] = t
 			}
 		}
 		if err != nil {
@@ -523,14 +518,14 @@ func compileIndexingForm(f IndexingForm, ns *Namespace,
 	}
 	for i := len(f.Args) - 2; i >= 0; i-- {
 		expr := f.Args[i]
-		if indexedType, ok := IsIndexableType(dt, ns); ok {
+		if indexedType, ok := IsIndexableType(dt); ok {
 			var c string
 			var argType Type
 			c, argType, err = compileExpression(expr, ns, nil, locals)
 			if err != nil {
 				return
 			}
-			if !isInteger(argType) {
+			if !IsInteger(argType) {
 				err = msg(f.Line, f.Column, "Expecting integer for array index in indexing form.")
 				return
 			}
@@ -544,10 +539,10 @@ func compileIndexingForm(f IndexingForm, ns *Namespace,
 				}
 				dt, ok = GetFieldType(varExpr.Name, dt)
 				if !ok {
-					err = msg(varExpr.Line, varExpr.Column, "No field called '"+varExpr.Name+"' in indexing form.")
+					err = msg(varExpr.Line, varExpr.Column, "No field called '"+string(varExpr.Name)+"' in indexing form.")
 					return
 				}
-				code += "." + varExpr.Name
+				code += "." + string(varExpr.Name)
 			} else {
 				err = msg(varExpr.Line, varExpr.Column, "Improper name in indexing form.")
 				return
@@ -559,22 +554,22 @@ func compileIndexingForm(f IndexingForm, ns *Namespace,
 
 func compileAssignment(f AssignmentForm, ns *Namespace, locals map[ShortName]Type,
 	indent string) (code string, err error) {
-	var dt DataType
+	var dt Type
 	switch target := f.Target.(type) {
 	case VarExpression:
-
-		isLocal := true
 		if target.Namespace == "" {
-			dt, isLocal = locals[target.Name]
-		}
-		if isLocal {
-			code = "_" + target.Name
-		} else {
-			dt, code = getGlobal(target.Name, target.Namespace, ns)
-			if code == "" {
-				return "", msg(f.Line, f.Column, "Assignment to non-existent variable.")
+			var ok bool
+			dt, ok = locals[target.Name] // local name takes precedence over unqualified global name
+			if ok {
+				code = "_" + string(target.Name)
+				break
 			}
 		}
+		globalInfo := ns.GetGlobal(target.Name, target.Namespace)
+		if globalInfo == nil {
+			return "", msg(f.Line, f.Column, "Assignment to non-existent variable.")
+		}
+		code = string(globalInfo.Namespace.CSName) + "." + string(globalInfo.Name)
 	case IndexingForm:
 		code, dt, err = compileIndexingForm(target, ns, locals)
 		if err != nil {
@@ -608,31 +603,27 @@ func compileReturn(f ReturnForm, returnType Type, ns *Namespace, locals map[Shor
 
 func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
 	code := indent + "public static "
-	if isZeroType(f.Return) {
+	returnType := ns.GetType(f.Return.Name, f.Return.Namespace)
+	if returnType == nil {
 		code += "void "
 	} else {
-		c, err := compileType(f.Return, ns)
-		if err != nil {
-			return "", err
-		}
-		code += c + " "
+		code += compileType(returnType) + " "
 	}
-	code += f.Name + "("
+	code += string(f.Name) + "("
 	locals := map[ShortName]Type{}
 	for i, paramName := range f.ParamNames {
-		paramType := f.ParamTypes[i]
-		locals[paramName] = paramType
-		c, err := compileType(paramType, ns)
-		if err != nil {
-			return "", err
+		paramType := ns.GetType(f.ParamTypes[i].Name, f.ParamTypes[i].Namespace)
+		if paramType == nil {
+			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
-		code += "_" + paramName + " " + c
+		locals[paramName] = paramType
+		code += "_" + string(paramName) + " " + compileType(paramType)
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
 	}
 	code += ") {\n"
-	body, err := compileBody(f.Body, f.Return, ns, locals, false, f.Return.Name != "", indent+"\t")
+	body, err := compileBody(f.Body, returnType, ns, locals, false, returnType != nil, indent+"\t")
 	if err != nil {
 		return "", err
 	}
@@ -642,31 +633,27 @@ func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
 
 func compileMethod(f MethodDef, class Type, ns *Namespace, indent string) (string, error) {
 	code := indent + "public "
-	if isZeroType(f.Return) {
+	returnType := ns.GetType(f.Return.Name, f.Return.Namespace)
+	if returnType == nil {
 		code += "void "
 	} else {
-		c, err := compileType(f.Return, ns)
-		if err != nil {
-			return "", err
-		}
-		code += c + " "
+		code += compileType(returnType) + " "
 	}
-	code += f.Name + "("
+	code += string(f.Name) + "("
 	locals := map[ShortName]Type{thisWord: class}
 	for i, paramName := range f.ParamNames {
-		paramType := f.ParamTypes[i]
-		locals[paramName] = paramType
-		c, err := compileType(paramType, ns)
-		if err != nil {
-			return "", err
+		paramType := ns.GetType(f.ParamTypes[i].Name, f.ParamTypes[i].Namespace)
+		if paramType == nil {
+			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
-		code += "_" + paramName + " " + c
+		locals[paramName] = paramType
+		code += "_" + string(paramName) + " " + compileType(paramType)
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
 	}
 	code += ") {\n"
-	body, err := compileBody(f.Body, f.Return, ns, locals, false, f.Return.Name != "", indent+"\t")
+	body, err := compileBody(f.Body, returnType, ns, locals, false, returnType != nil, indent+"\t")
 	if err != nil {
 		return "", err
 	}
@@ -674,23 +661,31 @@ func compileMethod(f MethodDef, class Type, ns *Namespace, indent string) (strin
 	return code, nil
 }
 
-func compileConstructor(f ConstructorDef, class Type, ns *Namespace, indent string) (string, error) {
-	code := indent + "public " + class.Name + "("
-	locals := map[ShortName]Type{thisWord: class}
+// type should be a class or struct
+func compileConstructor(f ConstructorDef, t Type, ns *Namespace, indent string) (string, error) {
+	var name string
+	switch t := t.(type) {
+	case *ClassInfo:
+		name = string(t.Name)
+	case *StructInfo:
+		name = string(t.Name)
+	}
+
+	code := indent + "public " + name + "("
+	locals := map[ShortName]Type{thisWord: t}
 	for i, paramName := range f.ParamNames {
-		paramType := f.ParamTypes[i]
-		locals[paramName] = paramType
-		c, err := compileType(paramType, ns)
-		if err != nil {
-			return "", err
+		paramType := ns.GetType(f.ParamTypes[i].Name, f.ParamTypes[i].Namespace)
+		if paramType == nil {
+			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
-		code += "_" + paramName + " " + c
+		locals[paramName] = paramType
+		code += "_" + string(paramName) + " " + compileType(paramType)
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
 	}
 	code += ") {\n"
-	body, err := compileBody(f.Body, class, ns, locals, false, false, indent+"\t")
+	body, err := compileBody(f.Body, t, ns, locals, false, false, indent+"\t")
 	if err != nil {
 		return "", err
 	}
@@ -708,18 +703,21 @@ func compileField(f FieldDef, ns *Namespace, indent string) (string, error) {
 	case ProtectedAccess:
 		code += "protected "
 	}
-	typeStr, err := compileType(f.Type, ns)
-	if err != nil {
-		return "", err
+
+	t := ns.GetType(f.Type.Name, f.Type.Namespace)
+	if t == nil {
+		return "", msg(f.Line, f.Column, "Field has unknown type.")
 	}
+
+	typeStr := compileType(t)
 	if f.Value != nil {
-		exprStr, _, err := compileExpression(f.Value, ns, f.Type, nil)
+		exprStr, _, err := compileExpression(f.Value, ns, t, nil)
 		if err != nil {
 			return "", err
 		}
-		code += typeStr + " " + f.Name + " = " + exprStr + ";"
+		code += typeStr + " " + string(f.Name) + " = " + exprStr + ";"
 	} else {
-		code += typeStr + " " + f.Name + ";"
+		code += typeStr + " " + string(f.Name) + ";"
 	}
 	return code, nil
 }
@@ -730,6 +728,7 @@ func compileProperty(p PropertyDef, ns *Namespace, indent string) (string, error
 }
 
 func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
+
 	var code string
 	switch f.AccessLevel {
 	case PublicAccess:
@@ -739,17 +738,28 @@ func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
 	case ProtectedAccess:
 		code = "protected "
 	}
-	code += f.Type.Name
-	if len(f.Supertypes) > 0 {
+	if f.Type.Namespace != "" {
+		return "", msg(f.Line, f.Column, "Class name in its definition should not be qualified by namespace.")
+	}
+
+	classInfo := ns.GetClass(f.Type.Name, f.Type.Namespace)
+	if classInfo == nil {
+		panic("Internal error: cannot find ClassInfo when compiling class.")
+	}
+
+	code += string(f.Type.Name)
+	if len(classInfo.Interfaces) > 0 || classInfo.Parent != nil {
 		code += " : "
 	}
-	for i, super := range f.Supertypes {
-		typeStr, err := compileType(super, ns)
-		if err != nil {
-			return "", err
-		}
-		code += typeStr
-		if i != len(f.Supertypes)-1 {
+	if classInfo.Parent != nil {
+		code += compileType(classInfo.Parent)
+	}
+	if len(classInfo.Interfaces) > 0 {
+		code += ", "
+	}
+	for i, inter := range classInfo.Interfaces {
+		code += compileType(inter)
+		if i < len(classInfo.Interfaces)-1 {
 			code += ", "
 		}
 	}
@@ -772,14 +782,14 @@ func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
 		code += c + "\n"
 	}
 	for _, constructorDef := range f.Constructors {
-		c, err := compileConstructor(constructorDef, f.Type, ns, "\t")
+		c, err := compileConstructor(constructorDef, classInfo, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
 	}
 	for i, methodDef := range f.Methods {
-		c, err := compileMethod(methodDef, f.Type, ns, "\t")
+		c, err := compileMethod(methodDef, classInfo, ns, "\t")
 		if err != nil {
 			return "", err
 		}
@@ -802,18 +812,25 @@ func compileStruct(f StructDef, ns *Namespace) (string, error) {
 	case ProtectedAccess:
 		code = "protected "
 	}
-	code += f.Type.Name + " "
-	for i, inter := range f.Interfaces {
-		typeStr, err := compileType(inter, ns)
-		if err != nil {
-			return "", err
-		}
-		if i == 0 {
-			code += ": "
-		} else {
+
+	if f.Type.Namespace != "" {
+		return "", msg(f.Line, f.Column, "Struct name in its definition should not be qualified by namespace.")
+	}
+
+	structInfo := ns.GetStruct(f.Type.Name, f.Type.Namespace)
+	if structInfo == nil {
+		panic("Internal error: cannot find StructInfo when compiling struct.")
+	}
+
+	code += string(f.Type.Name)
+	if len(structInfo.Interfaces) > 0 {
+		code += " : "
+	}
+	for i, inter := range structInfo.Interfaces {
+		code += compileType(inter)
+		if i < len(structInfo.Interfaces)-1 {
 			code += ", "
 		}
-		code += typeStr
 	}
 	code += " {"
 	for _, fieldDef := range f.Fields {
@@ -831,14 +848,14 @@ func compileStruct(f StructDef, ns *Namespace) (string, error) {
 		code += c + "\n"
 	}
 	for _, constructorDef := range f.Constructors {
-		c, err := compileConstructor(constructorDef, f.Type, ns, "\t")
+		c, err := compileConstructor(constructorDef, structInfo, ns, "\t")
 		if err != nil {
 			return "", err
 		}
 		code += c + "\n"
 	}
 	for _, methodDef := range f.Methods {
-		c, err := compileMethod(methodDef, f.Type, ns, "\t")
+		c, err := compileMethod(methodDef, structInfo, ns, "\t")
 		if err != nil {
 			return "", err
 		}
@@ -849,6 +866,15 @@ func compileStruct(f StructDef, ns *Namespace) (string, error) {
 }
 
 func compileInterface(def InterfaceDef, ns *Namespace, indent string) (string, error) {
+	if def.Type.Namespace != "" {
+		return "", msg(def.Line, def.Column, "Interface name in its definition should not be qualified by namespace.")
+	}
+
+	interfaceInfo := ns.GetInterface(def.Type.Name, def.Type.Namespace)
+	if interfaceInfo == nil {
+		panic("Internal error: cannot find ClassInfo when compiling class.")
+	}
+
 	var code string
 	switch def.AccessLevel {
 	case PublicAccess:
@@ -858,44 +884,32 @@ func compileInterface(def InterfaceDef, ns *Namespace, indent string) (string, e
 	case ProtectedAccess:
 		code = "protected "
 	}
-	code += def.Type.Name
-	if len(def.ParentInterfaces) > 0 {
+	code += string(interfaceInfo.Name)
+	if len(interfaceInfo.Parents) > 0 {
 		code += " : "
 	}
-	for i, parent := range def.ParentInterfaces {
-		typeStr, err := compileType(parent, ns)
-		if err != nil {
-			return "", err
-		}
-		code += typeStr
-		if i != len(def.ParentInterfaces)-1 {
+	for i, parent := range interfaceInfo.Parents {
+		code += compileType(parent)
+		if i < len(interfaceInfo.Parents)-1 {
 			code += ", "
 		}
 	}
 	code += " {\n"
-	for i, methodName := range def.MethodNames {
-		returnType := def.MethodReturnTypes[i]
-		if isZeroType(returnType) {
-			code += "\tpublic void " + methodName + "("
-		} else {
-			c, err := compileType(returnType, ns)
-			if err != nil {
-				return "", err
-			}
-			code += "\tpublic " + c + " " + methodName + "("
-		}
-		for j, param := range def.MethodParams[i] {
-			c, err := compileType(param, ns)
-			if err != nil {
-				return "", err
-			}
-			if j == len(def.MethodParams)-1 {
-				code += c
+	for name, methods := range interfaceInfo.Methods {
+		for _, method := range methods {
+			if method.Return == nil {
+				code += "\tpublic void " + string(name) + "("
 			} else {
-				code += c + ", "
+				code += "\tpublic " + compileType(method.Return) + " " + string(name) + "("
 			}
+			for i, paramType := range method.ParamTypes {
+				code += compileType(paramType)
+				if i < len(method.ParamTypes)-1 {
+					code += ", "
+				}
+			}
+			code += ");\n"
 		}
-		code += ");\n"
 	}
 	code += "}\n\n"
 	return code, nil

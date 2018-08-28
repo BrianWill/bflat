@@ -175,10 +175,10 @@ type NamespaceDef struct {
 type FuncDef struct {
 	Line        int
 	Column      int
-	Name        string
+	Name        ShortName
 	StaticClass string
 	ParamTypes  []TypeAtom
-	ParamNames  []string
+	ParamNames  []ShortName
 	Return      TypeAtom
 	Body        []Statement
 	Annotations []AnnotationForm
@@ -220,7 +220,7 @@ type InterfaceInfo struct {
 	Name      ShortName
 	Namespace *Namespace
 	Parents   []*InterfaceInfo
-	Methods   map[ShortName]*CallableInfo
+	Methods   map[ShortName][]*CallableInfo // an interface can have overloads of the same method name
 	Params    []Type
 }
 
@@ -252,7 +252,7 @@ func (t BuiltinType) Type()    {}
 type CallableInfo struct {
 	IsMethod    bool
 	Namespace   *Namespace
-	ParamNames  []string
+	ParamNames  []ShortName
 	ParamTypes  []Type
 	Return      Type
 	StaticClass string // class to which this static function belongs ()
@@ -273,8 +273,8 @@ type IndexingForm struct {
 type CallForm struct {
 	Line        int
 	Column      int
-	Name        string
-	Namespace   string
+	Name        ShortName
+	Namespace   NSNameShort
 	StaticClass string
 	Args        []Expression
 }
@@ -442,7 +442,7 @@ type TryForm struct {
 	Line        int
 	Column      int
 	Body        []Statement
-	CatchTypes  []Type // CaseValues and Casebodies are parallel
+	CatchTypes  []TypeAtom // CaseValues and Casebodies are parallel
 	CatchBodies [][]Statement
 	FinallyBody []Statement
 }
@@ -503,8 +503,8 @@ type ForForm struct {
 type VarForm struct {
 	Line   int
 	Column int
-	Target string
-	Type   Type
+	Target ShortName
+	Type   TypeAtom
 	Value  Expression
 }
 
@@ -536,7 +536,7 @@ type FieldInfo struct {
 type StructDef struct {
 	Line         int
 	Column       int
-	Type         Type
+	Type         TypeAtom
 	AccessLevel  AccessLevel
 	Interfaces   []TypeAtom
 	Fields       []FieldDef
@@ -564,7 +564,7 @@ type MethodDef struct {
 	Column      int
 	Name        ShortName
 	ParamTypes  []TypeAtom
-	ParamNames  []string
+	ParamNames  []ShortName
 	Return      TypeAtom
 	Body        []Statement
 	Annotations []AnnotationForm
@@ -574,7 +574,7 @@ type ConstructorDef struct {
 	Line        int
 	Column      int
 	ParamTypes  []TypeAtom
-	ParamNames  []string
+	ParamNames  []ShortName
 	Body        []Statement
 	Annotations []AnnotationForm
 }
@@ -696,7 +696,7 @@ type Namespace struct {
 	Name      NSNameFull
 	Shortname NSNameShort
 	CSName    NSNameCS
-	Imported  map[NSNameShort]*Namespace
+	Imports   map[NSNameShort]*Namespace
 
 	Classes      map[ShortName]*ClassInfo
 	Structs      map[ShortName]*StructInfo
@@ -753,7 +753,7 @@ var SignedByteType = BuiltinType{
 	Name: "SB",
 }
 
-var OperatorSymbols = map[string]string{
+var OperatorSymbols = map[ShortName]string{
 	"add":  " + ",
 	"sub":  " - ",
 	"mul":  " * ",
@@ -776,7 +776,7 @@ var OperatorSymbols = map[string]string{
 func main() {
 	debugMode := true
 	var directory string
-	var namespace string
+	var namespace NSNameFull
 	if debugMode {
 		directory = "."
 		namespace = "example"
@@ -785,7 +785,7 @@ func main() {
 			fmt.Println("Must specify a namespace (short name) and directory.")
 			return
 		}
-		namespace = os.Args[1] // expecting the short name, not the full namespace name
+		namespace = NSNameFull(os.Args[1]) // expecting the full namespace name
 
 		directory = "."
 		if len(os.Args) == 3 {
@@ -800,7 +800,7 @@ func main() {
 
 	start := time.Now()
 
-	err := compileNamespace(namespace, directory, map[string]*Namespace{})
+	err := compileNamespace(namespace, directory, map[NSNameFull]*Namespace{})
 	if err != nil {
 		fmt.Println(err)
 		return

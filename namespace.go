@@ -2,14 +2,13 @@ package main
 
 import (
 	"errors"
-
 )
 
 func (ns *Namespace) GetClass(short ShortName, nsShort NSNameShort) *ClassInfo {
 	if nsShort == "" {
 		return ns.Classes[short]
 	}
-	ns = ns.Imported[nsShort]
+	ns = ns.Imports[nsShort]
 	if ns == nil {
 		return nil
 	}
@@ -20,7 +19,7 @@ func (ns *Namespace) GetInterface(short ShortName, nsShort NSNameShort) *Interfa
 	if nsShort == "" {
 		return ns.Interfaces[short]
 	}
-	ns = ns.Imported[nsShort]
+	ns = ns.Imports[nsShort]
 	if ns == nil {
 		return nil
 	}
@@ -31,7 +30,7 @@ func (ns *Namespace) GetStruct(short ShortName, nsShort NSNameShort) *StructInfo
 	if nsShort == "" {
 		return ns.Structs[short]
 	}
-	ns = ns.Imported[nsShort]
+	ns = ns.Imports[nsShort]
 	if ns == nil {
 		return nil
 	}
@@ -42,7 +41,7 @@ func (ns *Namespace) GetConstructors(short ShortName, nsShort NSNameShort) []*Ca
 	if nsShort == "" {
 		return ns.Constructors[short]
 	}
-	ns = ns.Imported[nsShort]
+	ns = ns.Imports[nsShort]
 	if ns == nil {
 		return nil
 	}
@@ -53,7 +52,7 @@ func (ns *Namespace) GetGlobal(short ShortName, nsShort NSNameShort) *GlobalInfo
 	if nsShort == "" {
 		return ns.Globals[short]
 	}
-	ns = ns.Imported[nsShort]
+	ns = ns.Imports[nsShort]
 	if ns == nil {
 		return nil
 	}
@@ -64,7 +63,7 @@ func (ns *Namespace) GetFuncs(short ShortName, nsShort NSNameShort) []*CallableI
 	if nsShort == "" {
 		return ns.Funcs[short]
 	}
-	ns = ns.Imported[nsShort]
+	ns = ns.Imports[nsShort]
 	if ns == nil {
 		return nil
 	}
@@ -75,7 +74,7 @@ func (ns *Namespace) GetMethods(short ShortName, nsShort NSNameShort) []*Callabl
 	if nsShort == "" {
 		return ns.Methods[short]
 	}
-	ns = ns.Imported[nsShort]
+	ns = ns.Imports[nsShort]
 	if ns == nil {
 		return nil
 	}
@@ -116,7 +115,7 @@ func (ns *Namespace) GetType(short ShortName, nsShort NSNameShort) Type {
 	return nil
 }
 
-func (ns *Namespace) HasName(short ShortName) {
+func (ns *Namespace) HasName(short ShortName) bool {
 	if ns.Methods[short] != nil {
 		return true
 	}
@@ -138,8 +137,6 @@ func (ns *Namespace) HasName(short ShortName) {
 	return false
 }
 
-
-
 func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, namespaces map[NSNameFull]*Namespace) (*Namespace, error) {
 	if topDefs.Namespace.Name == "" {
 		return nil, errors.New("Namespace '" + string(namespace) + "' missing its namespace declaration.")
@@ -149,7 +146,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 	}
 	ns := &Namespace{
 		Name:         namespace,
-		Imported:     map[NSNameShort]*Namespace{},
+		Imports:      map[NSNameShort]*Namespace{},
 		Classes:      map[ShortName]*ClassInfo{},
 		Structs:      map[ShortName]*StructInfo{},
 		Interfaces:   map[ShortName]*InterfaceInfo{},
@@ -240,7 +237,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		}
 	}
 
-	for i, interfaceDef := range topDefs.Interfaces {
+	for _, interfaceDef := range topDefs.Interfaces {
 		if ns.HasName(interfaceDef.Type.Name) {
 			return nil, msg(interfaceDef.Line, interfaceDef.Column, "Interface name already used.")
 		}
@@ -251,7 +248,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		}
 	}
 
-	for i, structDef := range topDefs.Structs {
+	for _, structDef := range topDefs.Structs {
 		if ns.HasName(structDef.Type.Name) {
 			return nil, msg(structDef.Line, structDef.Column, "Struct name already used.")
 		}
@@ -297,24 +294,23 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 	for _, interfaceDef := range topDefs.Interfaces {
 		interfaceInfo := ns.GetInterface(interfaceDef.Type.Name, interfaceDef.Type.Namespace)
 
-
-		methodSigs := map[string][][]Type{}
+		methodSigs := map[ShortName][][]Type{}
 		for i, methodName := range interfaceDef.MethodNames {
 			methodParams := interfaceDef.MethodParams[i]
 			methodReturn := interfaceDef.MethodReturnTypes[i]
 
 			returnType := ns.GetType(methodReturn.Name, methodReturn.Namespace)
 			if returnType == nil {
-				return nil, msg(interfaceDef.Line, interfaceDef.Column, "Method return type is of unknown type: " + methodReturn.Name + "/" + methodReturn.Namespace)
+				return nil, msg(interfaceDef.Line, interfaceDef.Column, "Method return type is of unknown type: "+string(methodReturn.Name)+"/"+string(methodReturn.Namespace))
 			}
 
-			types, err := getParamTypes(methodParams)
+			types, err := getParamTypes(methodParams, ns)
 			if err != nil {
 				return nil, err
 			}
 
 			if signatureConflict(types, methodSigs[methodName]) {
-				return nil, msg(interfaceDef.Line, interfaceDef.Column, "Two or more methods in an interface have the same name and parameter types, so all calls would be ambiguous: " + method.Name)
+				return nil, msg(interfaceDef.Line, interfaceDef.Column, "Two or more methods in an interface have the same name and parameter types, so all calls would be ambiguous: "+string(methodName))
 			}
 
 			methodSigs[methodName] = append(methodSigs[methodName], types)
@@ -322,13 +318,13 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 			callable := &CallableInfo{
 				IsMethod:   true,
 				Namespace:  ns,
-				ParamNames: make([]string, len(types) + 1),       // in case len(ParamNames) used for looping over params       
+				ParamNames: make([]ShortName, len(types)+1), // in case len(ParamNames) used for looping over params
 				ParamTypes: append([]Type{interfaceInfo}, types...),
-				Return: returnType,
+				Return:     returnType,
 			}
 
 			ns.Methods[methodName] = append(ns.Methods[methodName], callable)
-			interfaceInfo.Methods = append(interfaceInfo.Methods, callable)
+			interfaceInfo.Methods[methodName] = append(interfaceInfo.Methods[methodName], callable)
 		}
 	}
 
@@ -336,7 +332,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 	for _, classDef := range topDefs.Classes {
 		classInfo := ns.Classes[classDef.Type.Name] // should never be nil
 
-		interfaces := []*InterfaceInfo
+		interfaces := []*InterfaceInfo{}
 		for i, dt := range classDef.Supertypes {
 			if i == 0 {
 				parentClass := ns.GetClass(dt.Name, dt.Namespace)
@@ -367,23 +363,23 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 				Type:        t,
 				AccessLevel: f.AccessLevel,
 			}
-		} 
+		}
 
 		hasZeroArgConstructor := false
-		
-		constructorSigs := [][]Type{} 
+
+		constructorSigs := [][]Type{}
 		for _, constructor := range classDef.Constructors {
 			if len(constructor.ParamNames) == 0 {
 				hasZeroArgConstructor = true
 			}
 
-			types, err := getParamTypes(constructor.ParamTypes)
+			types, err := getParamTypes(constructor.ParamTypes, ns)
 			if err != nil {
 				return nil, err
 			}
 
 			if signatureConflict(types, constructorSigs) {
-				return nil, msg(fn.Line, fn.Column, "Two or more constructors of the same class have the same parameter types, so all calls would be ambiguous:" + classDef.Name + "/" + classDef.Namespace)
+				return nil, msg(constructor.Line, constructor.Column, "Two or more constructors of the same class have the same parameter types, so all calls would be ambiguous:"+string(classDef.Type.Name)+"/"+string(classDef.Type.Namespace))
 			}
 
 			constructorSigs = append(constructorSigs, types)
@@ -394,7 +390,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 					Namespace:  ns,
 					ParamNames: constructor.ParamNames,
 					ParamTypes: types,
-					Return: classInfo,
+					Return:     classInfo,
 				},
 			)
 		}
@@ -407,26 +403,26 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 					Namespace:  ns,
 					ParamNames: nil,
 					ParamTypes: nil,
-					Return: classInfo,
+					Return:     classInfo,
 				},
 			)
 		}
 
 		classInfo.Methods = map[ShortName][]*CallableInfo{}
-		methodSigs := map[string][][]Type{} 
+		methodSigs := map[ShortName][][]Type{}
 		for _, method := range classDef.Methods {
 			returnType := ns.GetType(method.Return.Name, method.Return.Namespace)
 			if returnType == nil {
-				return nil, msg(method.Line, method.Column, "Method return type is of unknown type: " + method.Return.Name + "/" + method.Return.Namespace)
+				return nil, msg(method.Line, method.Column, "Method return type is of unknown type: "+string(method.Return.Name)+"/"+string(method.Return.Namespace))
 			}
 
-			types, err := getParamTypes(method.ParamTypes)
+			types, err := getParamTypes(method.ParamTypes, ns)
 			if err != nil {
 				return nil, err
 			}
 
 			if signatureConflict(types, methodSigs[method.Name]) {
-				return nil, msg(method.Line, method.Column, "Two or more methods of the same class have the same name and parameter types, so all calls would be ambiguous: " + method.Name)
+				return nil, msg(method.Line, method.Column, "Two or more methods of the same class have the same name and parameter types, so all calls would be ambiguous: "+string(method.Name))
 			}
 
 			methodSigs[method.Name] = append(methodSigs[method.Name], types)
@@ -434,9 +430,9 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 			callable := &CallableInfo{
 				IsMethod:   true,
 				Namespace:  ns,
-				ParamNames: append([]string{thisWord}, method.ParamNames...),
+				ParamNames: append([]ShortName{thisWord}, method.ParamNames...),
 				ParamTypes: append([]Type{classInfo}, types...),
-				Return: returnType,
+				Return:     returnType,
 			}
 
 			ns.Methods[method.Name] = append(ns.Methods[method.Name], callable)
@@ -447,48 +443,50 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		for _, interfaceInfo := range classInfo.Interfaces {
 			// todo: account for methods of ancestor interfaces
 
-			for name, im := range interfaceInfo.Methods {
-				match := false
-			Loop:
-				for _, cm := range classInfo.Methods[name] {
-					if cm.Return != im.Return {
-						continue
-					}
-					if len(im.ParamTypes) != len(cm.ParamTypes) {
-						continue
-					}
-					for i := 1; i < len(cm.ParamTypes); i++ {
-						if cm.ParamTypes[i] != im.ParamTypes[i] {
-							continue Loop
+			for name, methods := range interfaceInfo.Methods {
+				for _, im := range methods {
+					match := false
+				Loop:
+					for _, cm := range classInfo.Methods[name] {
+						if cm.Return != im.Return {
+							continue
 						}
+						if len(im.ParamTypes) != len(cm.ParamTypes) {
+							continue
+						}
+						for i := 1; i < len(cm.ParamTypes); i++ {
+							if cm.ParamTypes[i] != im.ParamTypes[i] {
+								continue Loop
+							}
+						}
+						match = true
+						break
 					}
-					match = true
-					break
-				}
 
-				if !match {
-					return nil, msg(classDef.Line, classDef.Column, "Class "+string(classInfo.Name)+" does not implement method "+
-						string(name)+" of interface "+string(interfaceInfo.Name)+"/"+string(interfaceInfo.Namespace)+".")
+					if !match {
+						return nil, msg(classDef.Line, classDef.Column, "Class "+string(classInfo.Name)+" does not implement method "+
+							string(name)+" of interface "+string(interfaceInfo.Name)+"/"+string(interfaceInfo.Namespace.Name)+".")
+					}
 				}
 			}
 		}
 	}
 
-	funcSigs := map[string][][]Type{} 
+	funcSigs := map[ShortName][][]Type{}
 	for _, fn := range topDefs.Funcs {
 
 		returnType := ns.GetType(fn.Return.Name, fn.Return.Namespace)
 		if returnType == nil {
-			return nil, msg(fn.Line, fn.Column, "Function return type is of unknown type:" + fn.Return.Name + "/" + fn.Return.Namespace)
+			return nil, msg(fn.Line, fn.Column, "Function return type is of unknown type:"+string(fn.Return.Name)+"/"+string(fn.Return.Namespace))
 		}
 
-		types, err := getParamTypes(fn.ParamTypes)
+		types, err := getParamTypes(fn.ParamTypes, ns)
 		if err != nil {
 			return nil, err
 		}
 
 		if signatureConflict(types, funcSigs[fn.Name]) {
-			return nil, msg(fn.Line, fn.Column, "Two or more functions with same name in this namespace have the same parameter types, so all calls would be ambiguous: " + fn.Name + "/" + fn.Namespace)
+			return nil, msg(fn.Line, fn.Column, "Two or more functions with same name in this namespace have the same parameter types, so all calls would be ambiguous: "+string(fn.Name))
 		}
 
 		funcSigs[fn.Name] = append(funcSigs[fn.Name], types)
@@ -499,12 +497,11 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 				Namespace:   ns,
 				ParamNames:  fn.ParamNames,
 				ParamTypes:  types,
-				Return:  returnType,
+				Return:      returnType,
 				StaticClass: fn.StaticClass,
 			},
 		)
 	}
-
 
 	// init global Type fields
 	for _, globalDef := range topDefs.Globals {
@@ -516,13 +513,12 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		globalInfo.Type = t
 	}
 
-
 	// init StructInfo Interfaces, Fields, constructors, and methods
 	for _, structDef := range topDefs.Structs {
 		structInfo := ns.Structs[structDef.Type.Name] // should never be nil
 
-		interfaces := []*InterfaceInfo
-		for i, dt := range structDef.Interfaces {
+		interfaces := []*InterfaceInfo{}
+		for _, dt := range structDef.Interfaces {
 			interfaceInfo := ns.GetInterface(dt.Name, dt.Namespace)
 			if interfaceInfo == nil {
 				return nil, msg(structDef.Line, structDef.Column, "Struct implements unknown interface.")
@@ -542,23 +538,23 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 				Type:        t,
 				AccessLevel: f.AccessLevel,
 			}
-		} 
+		}
 
 		hasZeroArgConstructor := false
-		
-		constructorSigs := [][]Type{} 
+
+		constructorSigs := [][]Type{}
 		for _, constructor := range structDef.Constructors {
 			if len(constructor.ParamNames) == 0 {
 				hasZeroArgConstructor = true
 			}
 
-			types, err := getParamTypes(constructor.ParamTypes)
+			types, err := getParamTypes(constructor.ParamTypes, ns)
 			if err != nil {
 				return nil, err
 			}
 
 			if signatureConflict(types, constructorSigs) {
-				return nil, msg(constructor.Line, constructor.Column, "Two or more constructors of the same class have the same parameter types, so all calls would be ambiguous: " + structDef.Name + "/" + structDef.Namespace)
+				return nil, msg(constructor.Line, constructor.Column, "Two or more constructors of the same class have the same parameter types, so all calls would be ambiguous: "+string(structDef.Type.Name)+"/"+string(structDef.Type.Namespace))
 			}
 
 			constructorSigs = append(constructorSigs, types)
@@ -569,7 +565,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 					Namespace:  ns,
 					ParamNames: constructor.ParamNames,
 					ParamTypes: types,
-					Return: structInfo,
+					Return:     structInfo,
 				},
 			)
 		}
@@ -582,26 +578,26 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 					Namespace:  ns,
 					ParamNames: nil,
 					ParamTypes: nil,
-					Return: structInfo,
+					Return:     structInfo,
 				},
 			)
 		}
 
 		structInfo.Methods = map[ShortName][]*CallableInfo{}
-		methodSigs := map[string][][]Type{} 
+		methodSigs := map[ShortName][][]Type{}
 		for _, method := range structDef.Methods {
 			returnType := ns.GetType(method.Return.Name, method.Return.Namespace)
 			if returnType == nil {
-				return nil, msg(method.Line, method.Column, "Method return type is of unknown type: " + method.Return.Name + "/" + method.Return.Namespace)
+				return nil, msg(method.Line, method.Column, "Method return type is of unknown type: "+string(method.Return.Name)+"/"+string(method.Return.Namespace))
 			}
 
-			types, err := getParamTypes(method.ParamTypes)
+			types, err := getParamTypes(method.ParamTypes, ns)
 			if err != nil {
 				return nil, err
 			}
 
 			if signatureConflict(types, methodSigs[method.Name]) {
-				return nil, msg(method.Line, method.Column, "Two or more methods of the same struct have the same name and parameter types, so all calls would be ambiguous: " + method.Name)
+				return nil, msg(method.Line, method.Column, "Two or more methods of the same struct have the same name and parameter types, so all calls would be ambiguous: "+string(method.Name))
 			}
 
 			methodSigs[method.Name] = append(methodSigs[method.Name], types)
@@ -609,9 +605,9 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 			callable := &CallableInfo{
 				IsMethod:   true,
 				Namespace:  ns,
-				ParamNames: append([]string{thisWord}, method.ParamNames...),
+				ParamNames: append([]ShortName{thisWord}, method.ParamNames...),
 				ParamTypes: append([]Type{structInfo}, types...),
-				Return: returnType,
+				Return:     returnType,
 			}
 
 			ns.Methods[method.Name] = append(ns.Methods[method.Name], callable)
@@ -622,28 +618,30 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		for _, interfaceInfo := range structInfo.Interfaces {
 			// todo: account for methods of ancestor interfaces
 
-			for name, im := range interfaceInfo.Methods {
-				match := false
-			Loop:
-				for _, sm := range structInfo.Methods[name] {
-					if sm.Return != im.Return {
-						continue
-					}
-					if len(im.ParamTypes) != len(sm.ParamTypes) {
-						continue
-					}
-					for i := 1; i < len(sm.ParamTypes); i++ {
-						if sm.ParamTypes[i] != im.ParamTypes[i] {
-							continue Loop
+			for name, methods := range interfaceInfo.Methods {
+				for _, im := range methods {
+					match := false
+				Loop2:
+					for _, sm := range structInfo.Methods[name] {
+						if sm.Return != im.Return {
+							continue
 						}
+						if len(im.ParamTypes) != len(sm.ParamTypes) {
+							continue
+						}
+						for i := 1; i < len(sm.ParamTypes); i++ {
+							if sm.ParamTypes[i] != im.ParamTypes[i] {
+								continue Loop2
+							}
+						}
+						match = true
+						break
 					}
-					match = true
-					break
-				}
 
-				if !match {
-					return nil, msg(structDef.Line, structDef.Column, "Struct "+string(structInfo.Name)+" does not implement method "+
-						string(name)+" of interface "+string(interfaceInfo.Name)+"/"+string(interfaceInfo.Namespace)+".")
+					if !match {
+						return nil, msg(structDef.Line, structDef.Column, "Struct "+string(structInfo.Name)+" does not implement method "+
+							string(name)+" of interface "+string(interfaceInfo.Name)+"/"+string(interfaceInfo.Namespace.Name)+".")
+					}
 				}
 			}
 		}
@@ -651,8 +649,6 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 
 	return ns, nil
 }
-
-
 
 func signatureConflict(sigTypes []Type, otherSigTypes [][]Type) bool {
 	for _, otherTypes := range otherSigTypes {
@@ -673,25 +669,21 @@ func signatureConflict(sigTypes []Type, otherSigTypes [][]Type) bool {
 	return false
 }
 
-
-func getParamTypes(typeAtoms []TypeAtom) ([]Type, error) {
+func getParamTypes(typeAtoms []TypeAtom, ns *Namespace) ([]Type, error) {
 	types := make([]Type, len(typeAtoms))
 	for i, ta := range typeAtoms {
 		t := ns.GetType(ta.Name, ta.Namespace)
 		if t == nil {
-			return nil, msg(ta.Line, ta.Column, "Parameter has unknown type:" + ta.Name + "/" + ta.Namespace)
+			return nil, msg(ta.Line, ta.Column, "Parameter has unknown type:"+string(ta.Name)+"/"+string(ta.Namespace))
 		}
 		types[i] = t
 	}
 	return types, nil
 }
 
-
-
-
 // returns true if field exists
 // todo: account for access level
-func GetFieldType(field string, t Type) (Type, bool) {
+func GetFieldType(field ShortName, t Type) (Type, bool) {
 	switch t := t.(type) {
 	case *ClassInfo:
 		// must search ancestors as well as the class itself
@@ -723,16 +715,14 @@ func GetFieldType(field string, t Type) (Type, bool) {
 			}
 		}
 	}
+	panic("shouldn't reach here")
+	return nil, false
 }
-
-
-
-
 
 // return false if other is not an interface
 // return true if t implements interface other
 func IsImplementor(t Type, other Type) bool {
-	interfaceInfo, ok := other.(*InterfaceInfo)
+	other, ok := other.(*InterfaceInfo)
 	if !ok {
 		return false
 	}
@@ -740,18 +730,18 @@ func IsImplementor(t Type, other Type) bool {
 	switch t := t.(type) {
 	case *StructInfo:
 		for _, ii := range t.Interfaces {
-			if IsDescendent(ii, interfaceInfo) {
+			if IsDescendent(ii, other) {
 				return true
 			}
 		}
 	case *ClassInfo:
 		for _, ii := range t.Interfaces {
-			if IsDescendent(ii, interfaceInfo) {
+			if IsDescendent(ii, other) {
 				return true
 			}
 		}
-		for _, parent := range t.Parents {
-			if IsImplementor(parent, interfaceInfo) {
+		if t.Parent != nil {
+			if IsImplementor(t.Parent, other) {
 				return true
 			}
 		}
@@ -774,14 +764,14 @@ func IsDescendent(t Type, other Type) bool {
 	switch t := t.(type) {
 	case *ClassInfo:
 		if other, ok := other.(*ClassInfo); ok {
-			for _, p := range t.Parents {
-				if IsDescendent(p, other) {
+			if t.Parent != nil {
+				if IsDescendent(t.Parent, other) {
 					return true
 				}
 			}
 		}
 	case *StructInfo:
-		return false        // structs cannot descend from other structs or classes
+		return false // structs cannot descend from other structs or classes
 	case *InterfaceInfo:
 		if other, ok := other.(*InterfaceInfo); ok {
 			for _, p := range t.Parents {
@@ -828,8 +818,6 @@ func IsDescendent(t Type, other Type) bool {
 	return false
 }
 
-
-
 func IsSubType(t Type, other Type) bool {
 	if other == AnyType {
 		return true
@@ -852,12 +840,10 @@ func IsSubType(t Type, other Type) bool {
 	return false
 }
 
-
-
 // return base type and dimension
 func GetArrayType(arr ArrayType) (base Type, dimensions int) {
 	dimensions = 1
-	for next, ok := arr.BaseType.(ArrayType); ok; {	
+	for next, ok := arr.BaseType.(ArrayType); ok; {
 		dimensions++
 		arr = next
 	}

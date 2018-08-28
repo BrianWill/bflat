@@ -23,6 +23,9 @@
 
 
 
+- when building InterfaceInfo, allow for method overloads, e.g. multiple methods named 'foo' in single interface
+
+
 - indexer methods
 
 (ns red.orange.blue)      // 'blue' is the short name; (in C#, equivalent of Red.Orange.Blue) 

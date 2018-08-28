@@ -1,4 +1,3 @@
-
 (ns example)
 
 (import otherspace)

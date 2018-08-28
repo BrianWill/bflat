@@ -125,7 +125,7 @@ func parseVarExpression(atom Atom) (VarExpression, error) {
 		if atom.Content == strings.Title(atom.Content) {
 			return VarExpression{}, errors.New("Invalid name (cannot begin with uppercase): " + spew.Sdump(atom))
 		}
-		expr.Name = atom.Content
+		expr.Name = ShortName(atom.Content)
 	case AtomChain:
 		atoms := atom.Atoms
 		if len(atoms) == 0 {
@@ -135,12 +135,12 @@ func parseVarExpression(atom Atom) (VarExpression, error) {
 			if symbol.Content == strings.Title(symbol.Content) {
 				return VarExpression{}, errors.New("Invalid name (cannot begin with uppercase): " + spew.Sdump(atom))
 			}
-			expr.Name = symbol.Content
+			expr.Name = ShortName(symbol.Content)
 			namespace, err := parseNamespace(atoms[1:], symbol.Line, symbol.Column)
 			if err != nil {
 				return VarExpression{}, errors.New("Invalid name: " + spew.Sdump(atom))
 			}
-			expr.Namespace = namespace
+			expr.Namespace = NSNameShort(namespace)
 		} else {
 			return VarExpression{}, errors.New("Invalid name (expecting symbol): " + spew.Sdump(atom))
 		}
@@ -307,7 +307,7 @@ func parseField(parens ParenList, annotations []AnnotationForm) (FieldDef, error
 	if !ok {
 		return FieldDef{}, errors.New("Expecting field name: " + spew.Sdump(parens))
 	}
-	field.Name = symbol.Content
+	field.Name = ShortName(symbol.Content)
 	idx++
 	if idx >= len(atoms) {
 		return FieldDef{}, errors.New("Expecting field type: " + spew.Sdump(parens))
@@ -339,7 +339,7 @@ func parseTypeAtom(atom Atom) (TypeAtom, error) {
 		if atom.Content != strings.Title(atom.Content) {
 			return TypeAtom{}, errors.New("Type name must begin with capital letter")
 		}
-		dataType.Name = atom.Content
+		dataType.Name = ShortName(atom.Content)
 		dataType.Line = atom.Line
 		dataType.Column = atom.Column
 	case AtomChain:
@@ -351,7 +351,7 @@ func parseTypeAtom(atom Atom) (TypeAtom, error) {
 			if symbol.Content != strings.Title(symbol.Content) {
 				return TypeAtom{}, errors.New("Type name must begin with capital letter")
 			}
-			dataType.Name = symbol.Content
+			dataType.Name = ShortName(symbol.Content)
 		}
 		if len(atoms) < 2 {
 			return TypeAtom{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
@@ -362,13 +362,13 @@ func parseTypeAtom(atom Atom) (TypeAtom, error) {
 			if len(angleAtoms) == 0 {
 				return TypeAtom{}, errors.New("Invalid type spec (empty angle brackets): " + spew.Sdump(atom))
 			}
-			dataType.TypeParams = []TypeAtom{}
+			dataType.Params = []TypeAtom{}
 			for _, typeAtom := range angleAtoms {
 				ts, err := parseTypeAtom(typeAtom)
 				if err != nil {
 					return TypeAtom{}, err
 				}
-				dataType.TypeParams = append(dataType.TypeParams, ts)
+				dataType.Params = append(dataType.Params, ts)
 			}
 			if len(atoms) < 3 {
 				break
@@ -377,13 +377,13 @@ func parseTypeAtom(atom Atom) (TypeAtom, error) {
 			if err != nil {
 				return TypeAtom{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 			}
-			dataType.Namespace = namespace
+			dataType.Namespace = NSNameShort(namespace)
 		case SigilAtom:
 			namespace, err := parseNamespace(atoms[1:], atom.Line, atom.Column)
 			if err != nil {
 				return TypeAtom{}, errors.New("Invalid type spec: " + spew.Sdump(atom))
 			}
-			dataType.Namespace = namespace
+			dataType.Namespace = NSNameShort(namespace)
 		default:
 			return TypeAtom{}, errors.New("Improperly formed data type name: " + spew.Sdump(atom))
 		}
@@ -394,25 +394,25 @@ func parseTypeAtom(atom Atom) (TypeAtom, error) {
 	if dataType.Name == "AA" && dataType.Namespace == "" {
 		dataType.Name = "A"
 		dataType = TypeAtom{
-			Name:       "A",
-			Line:       dataType.Line,
-			Column:     dataType.Column,
-			TypeParams: []TypeAtom{dataType},
+			Name:   "A",
+			Line:   dataType.Line,
+			Column: dataType.Column,
+			Params: []TypeAtom{dataType},
 		}
 	}
 	if dataType.Name == "AAA" && dataType.Namespace == "" {
 		dataType.Name = "A"
 		dataType = TypeAtom{
-			Name:       "A",
-			Line:       dataType.Line,
-			Column:     dataType.Column,
-			TypeParams: []TypeAtom{dataType},
+			Name:   "A",
+			Line:   dataType.Line,
+			Column: dataType.Column,
+			Params: []TypeAtom{dataType},
 		}
 		dataType = TypeAtom{
-			Name:       "A",
-			Line:       dataType.Line,
-			Column:     dataType.Column,
-			TypeParams: []TypeAtom{dataType},
+			Name:   "A",
+			Line:   dataType.Line,
+			Column: dataType.Column,
+			Params: []TypeAtom{dataType},
 		}
 	}
 	return dataType, nil
@@ -517,8 +517,8 @@ func parseImportDef(parens ParenList, annotations []AnnotationForm) (ImportDef, 
 	return ImportDef{
 		Line:        symbol.Line,
 		Column:      symbol.Column,
-		Namespace:   symbol.Content,
-		Shortname:   shortname,
+		Namespace:   NSNameFull(symbol.Content),
+		Shortname:   NSNameShort(shortname),
 		Exclusions:  exclusions,
 		Aliases:     aliases,
 		Annotations: annotations,
@@ -538,7 +538,7 @@ func parseNamespaceDef(parens ParenList, annotations []AnnotationForm) (Namespac
 		return NamespaceDef{}, errors.New("Invalid namespace form: name cannot start with uppercase letter. " + spew.Sdump(atoms))
 	}
 	return NamespaceDef{
-		Name:        symbol.Content,
+		Name:        NSNameFull(symbol.Content),
 		Line:        symbol.Line,
 		Column:      symbol.Column,
 		Annotations: annotations,
@@ -747,7 +747,7 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 		if symbol.Content == strings.Title(symbol.Content) {
 			return MethodDef{}, errors.New("Invalid method name (cannot begin with uppercase): " + spew.Sdump(symbol))
 		}
-		methodDef.Name = symbol.Content
+		methodDef.Name = ShortName(symbol.Content)
 	}
 	idx++
 	if idx >= len(atoms) {
@@ -767,7 +767,7 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 			return MethodDef{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
 		}
 		idx++
-		paramNames := []string{}
+		paramNames := []ShortName{}
 		paramTypes := []TypeAtom{}
 		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
@@ -778,7 +778,7 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 			if err != nil {
 				return MethodDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
-			paramNames = append(paramNames, symbol.Content)
+			paramNames = append(paramNames, ShortName(symbol.Content))
 			paramTypes = append(paramTypes, dt)
 			idx += 2
 		}
@@ -808,7 +808,7 @@ func parseProperty(parens ParenList, annotations []AnnotationForm) (PropertyDef,
 		if symbol.Content == strings.Title(symbol.Content) {
 			return PropertyDef{}, errors.New("Invalid property name (cannot begin with uppercase): " + spew.Sdump(symbol))
 		}
-		propertyDef.Name = symbol.Content
+		propertyDef.Name = ShortName(symbol.Content)
 	}
 	for i, atom := range atoms[3:] {
 		if chain, ok := atom.(AtomChain); ok {
@@ -855,7 +855,7 @@ func parseConstructor(parens ParenList, annotations []AnnotationForm) (Construct
 			return ConstructorDef{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
 		}
 		idx++
-		paramNames := []string{}
+		paramNames := []ShortName{}
 		paramTypes := []TypeAtom{}
 		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
@@ -866,7 +866,7 @@ func parseConstructor(parens ParenList, annotations []AnnotationForm) (Construct
 			if err != nil {
 				return ConstructorDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
-			paramNames = append(paramNames, symbol.Content)
+			paramNames = append(paramNames, ShortName(symbol.Content))
 			paramTypes = append(paramTypes, dt)
 			idx += 2
 		}
@@ -909,7 +909,7 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 		if symbol.Content == strings.Title(symbol.Content) {
 			return FuncDef{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(parens))
 		}
-		funcDef.Name = symbol.Content
+		funcDef.Name = ShortName(symbol.Content)
 	} else {
 		return FuncDef{}, errors.New("Invalid func name (cannot begin with uppercase): " + spew.Sdump(parens))
 	}
@@ -931,7 +931,7 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 			return FuncDef{}, errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
 		}
 		idx++
-		paramNames := []string{}
+		paramNames := []ShortName{}
 		paramTypes := []TypeAtom{}
 		for idx+1 < len(atoms) {
 			symbol, ok := atoms[idx].(Symbol)
@@ -942,7 +942,7 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 			if err != nil {
 				return FuncDef{}, errors.New("Invalid parameter type: " + spew.Sdump(atoms[idx+1]))
 			}
-			paramNames = append(paramNames, symbol.Content)
+			paramNames = append(paramNames, ShortName(symbol.Content))
 			paramTypes = append(paramTypes, dt)
 			idx += 2
 		}
@@ -1243,7 +1243,7 @@ func parseVar(atoms []Atom, line int, column int) (VarForm, error) {
 	varForm := VarForm{
 		Line:   line,
 		Column: column,
-		Target: symbol.Content,
+		Target: ShortName(symbol.Content),
 	}
 	valIdx := 2
 	if len(atoms) == 4 {
@@ -1411,7 +1411,7 @@ func parseGlobal(parens ParenList, annotations []AnnotationForm) (GlobalDef, err
 	if !ok {
 		return GlobalDef{}, errors.New("Expecting global name: " + spew.Sdump(parens))
 	}
-	globalDef.Name = symbol.Content
+	globalDef.Name = ShortName(symbol.Content)
 	idx++
 	if idx >= len(atoms) {
 		return GlobalDef{}, errors.New("Invalid global: " + spew.Sdump(parens))
@@ -1481,7 +1481,7 @@ func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDe
 				if err != nil {
 					return InterfaceDef{}, err
 				}
-				interfaceDef.MethodNames = append(interfaceDef.MethodNames, name)
+				interfaceDef.MethodNames = append(interfaceDef.MethodNames, ShortName(name))
 				interfaceDef.MethodParams = append(interfaceDef.MethodParams, paramTypes)
 				interfaceDef.MethodReturnTypes = append(interfaceDef.MethodReturnTypes, returnType)
 			case "f":
