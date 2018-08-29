@@ -469,13 +469,16 @@ func compileBody(statements []Statement, returnType Type,
 			if locals[f.Target] != nil {
 				return "", msg(f.Line, f.Column, "Local variable of same name already exists in this scope.")
 			}
-			typeStr := "var"
-			t := ns.GetType(f.Type.Name, f.Type.Namespace)
-			if t == nil {
-				return "", msg(f.Line, f.Column, "Var form specifies unknown type.")
-			}
-			if t != nil {
+			var typeStr string
+			var t Type
+			if f.Type.Name != "" {
+				t = ns.GetType(f.Type)
+				if t == nil {
+					return "", msg(f.Line, f.Column, "Var form specifies unknown type.")
+				}
 				typeStr = compileType(t)
+			} else {
+				typeStr = "var "
 			}
 			valStr := ""
 			var exprType Type
@@ -603,7 +606,7 @@ func compileReturn(f ReturnForm, returnType Type, ns *Namespace, locals map[Shor
 
 func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
 	code := indent + "public static "
-	returnType := ns.GetType(f.Return.Name, f.Return.Namespace)
+	returnType := ns.GetType(f.Return)
 	if returnType == nil {
 		code += "void "
 	} else {
@@ -612,7 +615,7 @@ func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
 	code += string(f.Name) + "("
 	locals := map[ShortName]Type{}
 	for i, paramName := range f.ParamNames {
-		paramType := ns.GetType(f.ParamTypes[i].Name, f.ParamTypes[i].Namespace)
+		paramType := ns.GetType(f.ParamTypes[i])
 		if paramType == nil {
 			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
@@ -633,7 +636,10 @@ func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
 
 func compileMethod(f MethodDef, class Type, ns *Namespace, indent string) (string, error) {
 	code := indent + "public "
-	returnType := ns.GetType(f.Return.Name, f.Return.Namespace)
+	if f.IsStatic {
+		code += "static "
+	}
+	returnType := ns.GetType(f.Return)
 	if returnType == nil {
 		code += "void "
 	} else {
@@ -642,7 +648,7 @@ func compileMethod(f MethodDef, class Type, ns *Namespace, indent string) (strin
 	code += string(f.Name) + "("
 	locals := map[ShortName]Type{thisWord: class}
 	for i, paramName := range f.ParamNames {
-		paramType := ns.GetType(f.ParamTypes[i].Name, f.ParamTypes[i].Namespace)
+		paramType := ns.GetType(f.ParamTypes[i])
 		if paramType == nil {
 			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
@@ -674,7 +680,7 @@ func compileConstructor(f ConstructorDef, t Type, ns *Namespace, indent string) 
 	code := indent + "public " + name + "("
 	locals := map[ShortName]Type{thisWord: t}
 	for i, paramName := range f.ParamNames {
-		paramType := ns.GetType(f.ParamTypes[i].Name, f.ParamTypes[i].Namespace)
+		paramType := ns.GetType(f.ParamTypes[i])
 		if paramType == nil {
 			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
@@ -704,7 +710,7 @@ func compileField(f FieldDef, ns *Namespace, indent string) (string, error) {
 		code += "protected "
 	}
 
-	t := ns.GetType(f.Type.Name, f.Type.Namespace)
+	t := ns.GetType(f.Type)
 	if t == nil {
 		return "", msg(f.Line, f.Column, "Field has unknown type.")
 	}

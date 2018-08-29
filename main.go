@@ -176,7 +176,6 @@ type FuncDef struct {
 	Line        int
 	Column      int
 	Name        ShortName
-	StaticClass string
 	ParamTypes  []TypeAtom
 	ParamNames  []ShortName
 	Return      TypeAtom
@@ -250,12 +249,12 @@ func (t ArrayType) Type()      {}
 func (t BuiltinType) Type()    {}
 
 type CallableInfo struct {
-	IsMethod    bool
-	Namespace   *Namespace
-	ParamNames  []ShortName
-	ParamTypes  []Type
-	Return      Type
-	StaticClass string // class to which this static function belongs ()
+	IsMethod   bool
+	Namespace  *Namespace
+	ParamNames []ShortName
+	ParamTypes []Type
+	Return     Type
+	Static     Type // class or struct to which this method belongs
 }
 
 type Expression interface {
@@ -271,12 +270,12 @@ type IndexingForm struct {
 }
 
 type CallForm struct {
-	Line        int
-	Column      int
-	Name        ShortName
-	Namespace   NSNameShort
-	StaticClass string
-	Args        []Expression
+	Line      int
+	Column    int
+	Name      ShortName
+	Namespace NSNameShort
+	Static    TypeAtom
+	Args      []Expression
 }
 
 type TypeCallForm struct {
@@ -565,6 +564,7 @@ type MethodDef struct {
 	Name        ShortName
 	ParamTypes  []TypeAtom
 	ParamNames  []ShortName
+	IsStatic    bool
 	Return      TypeAtom
 	Body        []Statement
 	Annotations []AnnotationForm
@@ -694,7 +694,7 @@ type ShortName string // unqualified name
 
 type Namespace struct {
 	Name      NSNameFull
-	Shortname NSNameShort
+	ShortName NSNameShort
 	CSName    NSNameCS
 	Imports   map[NSNameShort]*Namespace
 
@@ -779,7 +779,7 @@ func main() {
 	var namespace NSNameFull
 	if debugMode {
 		directory = "."
-		namespace = "example"
+		namespace = "test"
 	} else {
 		if len(os.Args) < 2 {
 			fmt.Println("Must specify a namespace (short name) and directory.")

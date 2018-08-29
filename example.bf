@@ -113,3 +113,19 @@
 
 
 // E<Str>         // like Option<Str>: maybe a string or maybe an error
+
+
+
+(class Bar
+    (f zelda F 35.0)
+
+    (m -static lisa
+        (var i B 3)
+        (as i 5)
+    )
+
+    (constructor 
+        (var i 3)
+        (as i 5)
+    )
+)

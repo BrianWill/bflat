@@ -664,13 +664,12 @@ func parseExpression(atom Atom) (Expression, error) {
 			return nil, errors.New("Invalid expression (empty parens): " + spew.Sdump(atom))
 		}
 		idx := 1
-		staticClass := ""
+		var staticType TypeAtom
 		if idx < len(atoms) {
-			if symbol, ok := atoms[idx].(Symbol); ok {
-				if symbol.Content == strings.Title(symbol.Content) {
-					staticClass = symbol.Content
-					idx++
-				}
+			var err error
+			staticType, err = parseTypeAtom(atoms[idx])
+			if err == nil {
+				idx++
 			}
 		}
 		sizeFlag := false
@@ -703,12 +702,12 @@ func parseExpression(atom Atom) (Expression, error) {
 			}
 		} else {
 			expr = CallForm{
-				Line:        atom.Line,
-				Column:      atom.Column,
-				Name:        varExpr.Name,
-				Namespace:   varExpr.Namespace,
-				StaticClass: staticClass,
-				Args:        args,
+				Line:      atom.Line,
+				Column:    atom.Column,
+				Name:      varExpr.Name,
+				Namespace: varExpr.Namespace,
+				Static:    staticType,
+				Args:      args,
 			}
 		}
 	default:
@@ -742,6 +741,10 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 	idx := 1
 	if idx >= len(atoms) {
 		return MethodDef{}, errors.New("Invalid method definition: " + spew.Sdump(parens))
+	}
+	if parseFlag(atoms[idx], "static") {
+		idx++
+		methodDef.IsStatic = true
 	}
 	if symbol, ok := atoms[idx].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
@@ -892,18 +895,6 @@ func parseFunc(parens ParenList, annotations []AnnotationForm) (FuncDef, error) 
 	idx := 1
 	if idx >= len(atoms) {
 		return FuncDef{}, errors.New("Invalid function definition: " + spew.Sdump(parens))
-	}
-	if parseFlag(atoms[idx], "static") {
-		idx++
-		if symbol, ok := atoms[idx].(Symbol); ok {
-			if symbol.Content != strings.Title(symbol.Content) {
-				return FuncDef{}, errors.New("Invalid class name for static function (must begin with uppercase letter)." + spew.Sdump(parens))
-			}
-			funcDef.StaticClass = symbol.Content
-		} else {
-			return FuncDef{}, errors.New("Expecting class name for static function." + spew.Sdump(parens))
-		}
-		idx++
 	}
 	if symbol, ok := atoms[idx].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {

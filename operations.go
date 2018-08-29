@@ -154,11 +154,12 @@ Loop:
 		if len(argTypes) != len(sig.ParamTypes) {
 			continue
 		}
-		if op.StaticClass != sig.StaticClass {
+		t := ns.GetType(op.Static)
+		if t != sig.Static {
 			continue
 		}
 		for j, paramType := range sig.ParamTypes {
-			if argTypes[j] != paramType {
+			if !IsSubType(argTypes[j], paramType) {
 				continue Loop
 			}
 		}
@@ -182,10 +183,10 @@ Loop:
 	if isMethod {
 		code += argCode[0] + "."
 	} else {
-		if sig.StaticClass == "" {
+		if sig.Static == nil {
 			code += string(sig.Namespace.Name) + "." + FuncsClass + "."
 		} else {
-			code += string(sig.Namespace.Name) + "." + sig.StaticClass + "."
+			code += string(sig.Namespace.Name) + "." + compileType(sig.Static) + "."
 		}
 	}
 	code += string(op.Name) + "("
@@ -207,7 +208,7 @@ Loop:
 
 func compileTypeCallForm(op TypeCallForm, ns *Namespace, expectedType Type,
 	locals map[ShortName]Type) (code string, returnType Type, err error) {
-	t := ns.GetType(op.Type.Name, op.Type.Namespace)
+	t := ns.GetType(op.Type)
 	if t == nil {
 		err = msg(op.Line, op.Column, "Invalid type call form: unknown type.")
 		return

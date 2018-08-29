@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 )
 
 func (ns *Namespace) GetClass(short ShortName, nsShort NSNameShort) *ClassInfo {
@@ -81,23 +82,27 @@ func (ns *Namespace) GetMethods(short ShortName, nsShort NSNameShort) []*Callabl
 	return ns.Methods[short]
 }
 
-func (ns *Namespace) GetType(short ShortName, nsShort NSNameShort) Type {
-	if c := ns.GetClass(short, nsShort); c != nil {
+func (ns *Namespace) GetType(ta TypeAtom) Type {
+	if c := ns.GetClass(ta.Name, ta.Namespace); c != nil {
 		return c
 	}
-	if s := ns.GetStruct(short, nsShort); s != nil {
+	if s := ns.GetStruct(ta.Name, ta.Namespace); s != nil {
 		return s
 	}
-	if i := ns.GetInterface(short, nsShort); i != nil {
+	if i := ns.GetInterface(ta.Name, ta.Namespace); i != nil {
 		return i
 	}
 
 	// return BuiltinType or ArrayType if a validd type
-	if nsShort == "" {
-		switch short {
+	if ta.Namespace == "" {
+		switch ta.Name {
 		case "A":
-			// todo: account for ArrayType (need to pass in type params?)
-			return nil
+			if len(ta.Params) != 1 {
+				panic("Array TypeAtom cannot have multiple type params")
+			}
+			return ArrayType{BaseType: ns.GetType(ta.Params[0])}
+		case "Str":
+			return StrType
 		case "I":
 			return IntType
 		case "II":
@@ -144,8 +149,26 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 	if topDefs.Namespace.Name != namespace {
 		return nil, errors.New("Namespace '" + string(namespace) + "' declaration does not match expected name.")
 	}
+
+	nsNameComponents := strings.Split(string(namespace), ".")
+	var shortName NSNameShort
+	csName := ""
+	for i, component := range nsNameComponents {
+		if component == strings.Title(component) {
+			return nil, errors.New("Namespace '" + string(namespace) + "' name should not have any component begin with an uppercase letter.")
+		}
+		csName += strings.Title(component)
+		if i < len(nsNameComponents)-1 {
+			csName += ", "
+		} else {
+			shortName = NSNameShort(component)
+		}
+	}
+
 	ns := &Namespace{
 		Name:         namespace,
+		ShortName:    shortName,
+		CSName:       NSNameCS(csName),
 		Imports:      map[NSNameShort]*Namespace{},
 		Classes:      map[ShortName]*ClassInfo{},
 		Structs:      map[ShortName]*StructInfo{},
@@ -294,14 +317,18 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 	for _, interfaceDef := range topDefs.Interfaces {
 		interfaceInfo := ns.GetInterface(interfaceDef.Type.Name, interfaceDef.Type.Namespace)
 
+		interfaceInfo.Methods = map[ShortName][]*CallableInfo{}
 		methodSigs := map[ShortName][][]Type{}
 		for i, methodName := range interfaceDef.MethodNames {
 			methodParams := interfaceDef.MethodParams[i]
 			methodReturn := interfaceDef.MethodReturnTypes[i]
 
-			returnType := ns.GetType(methodReturn.Name, methodReturn.Namespace)
-			if returnType == nil {
-				return nil, msg(interfaceDef.Line, interfaceDef.Column, "Method return type is of unknown type: "+string(methodReturn.Name)+"/"+string(methodReturn.Namespace))
+			var returnType Type
+			if methodReturn.Name != "" {
+				returnType = ns.GetType(methodReturn)
+				if returnType == nil {
+					return nil, msg(interfaceDef.Line, interfaceDef.Column, "Method return type is of unknown type: "+string(methodReturn.Name)+"/"+string(methodReturn.Namespace))
+				}
 			}
 
 			types, err := getParamTypes(methodParams, ns)
@@ -354,7 +381,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 
 		classInfo.Fields = map[ShortName]FieldInfo{}
 		for _, f := range classDef.Fields {
-			t := ns.GetType(f.Type.Name, f.Type.Namespace)
+			t := ns.GetType(f.Type)
 			if t == nil {
 				return nil, msg(f.Line, f.Column, "Field has unknown type.")
 			}
@@ -411,9 +438,12 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		classInfo.Methods = map[ShortName][]*CallableInfo{}
 		methodSigs := map[ShortName][][]Type{}
 		for _, method := range classDef.Methods {
-			returnType := ns.GetType(method.Return.Name, method.Return.Namespace)
-			if returnType == nil {
-				return nil, msg(method.Line, method.Column, "Method return type is of unknown type: "+string(method.Return.Name)+"/"+string(method.Return.Namespace))
+			var returnType Type
+			if method.Return.Name != "" {
+				returnType = ns.GetType(method.Return)
+				if returnType == nil {
+					return nil, msg(method.Line, method.Column, "Method return type is of unknown type: "+string(method.Return.Name)+"/"+string(method.Return.Namespace))
+				}
 			}
 
 			types, err := getParamTypes(method.ParamTypes, ns)
@@ -427,12 +457,18 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 
 			methodSigs[method.Name] = append(methodSigs[method.Name], types)
 
+			var staticType Type
+			if method.IsStatic {
+				staticType = classInfo
+			}
+
 			callable := &CallableInfo{
 				IsMethod:   true,
 				Namespace:  ns,
 				ParamNames: append([]ShortName{thisWord}, method.ParamNames...),
 				ParamTypes: append([]Type{classInfo}, types...),
 				Return:     returnType,
+				Static:     staticType,
 			}
 
 			ns.Methods[method.Name] = append(ns.Methods[method.Name], callable)
@@ -475,9 +511,12 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 	funcSigs := map[ShortName][][]Type{}
 	for _, fn := range topDefs.Funcs {
 
-		returnType := ns.GetType(fn.Return.Name, fn.Return.Namespace)
-		if returnType == nil {
-			return nil, msg(fn.Line, fn.Column, "Function return type is of unknown type:"+string(fn.Return.Name)+"/"+string(fn.Return.Namespace))
+		var returnType Type
+		if fn.Return.Name != "" {
+			returnType = ns.GetType(fn.Return)
+			if returnType == nil {
+				return nil, msg(fn.Line, fn.Column, "Function return type is of unknown type:"+string(fn.Return.Name)+"/"+string(fn.Return.Namespace))
+			}
 		}
 
 		types, err := getParamTypes(fn.ParamTypes, ns)
@@ -493,12 +532,11 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 
 		ns.Funcs[fn.Name] = append(ns.Funcs[fn.Name],
 			&CallableInfo{
-				IsMethod:    false,
-				Namespace:   ns,
-				ParamNames:  fn.ParamNames,
-				ParamTypes:  types,
-				Return:      returnType,
-				StaticClass: fn.StaticClass,
+				IsMethod:   false,
+				Namespace:  ns,
+				ParamNames: fn.ParamNames,
+				ParamTypes: types,
+				Return:     returnType,
 			},
 		)
 	}
@@ -506,7 +544,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 	// init global Type fields
 	for _, globalDef := range topDefs.Globals {
 		globalInfo := ns.Globals[globalDef.Name]
-		t := ns.GetType(globalDef.Type.Name, globalDef.Type.Namespace)
+		t := ns.GetType(globalDef.Type)
 		if t == nil {
 
 		}
@@ -529,7 +567,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 
 		structInfo.Fields = map[ShortName]FieldInfo{}
 		for _, f := range structDef.Fields {
-			t := ns.GetType(f.Type.Name, f.Type.Namespace)
+			t := ns.GetType(f.Type)
 			if t == nil {
 				return nil, msg(f.Line, f.Column, "Field has unknown type.")
 			}
@@ -586,9 +624,12 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		structInfo.Methods = map[ShortName][]*CallableInfo{}
 		methodSigs := map[ShortName][][]Type{}
 		for _, method := range structDef.Methods {
-			returnType := ns.GetType(method.Return.Name, method.Return.Namespace)
-			if returnType == nil {
-				return nil, msg(method.Line, method.Column, "Method return type is of unknown type: "+string(method.Return.Name)+"/"+string(method.Return.Namespace))
+			var returnType Type
+			if method.Return.Name != "" {
+				returnType = ns.GetType(method.Return)
+				if returnType == nil {
+					return nil, msg(method.Line, method.Column, "Method return type is of unknown type: "+string(method.Return.Name)+"/"+string(method.Return.Namespace))
+				}
 			}
 
 			types, err := getParamTypes(method.ParamTypes, ns)
@@ -608,6 +649,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 				ParamNames: append([]ShortName{thisWord}, method.ParamNames...),
 				ParamTypes: append([]Type{structInfo}, types...),
 				Return:     returnType,
+				Static:     structInfo,
 			}
 
 			ns.Methods[method.Name] = append(ns.Methods[method.Name], callable)
@@ -672,7 +714,7 @@ func signatureConflict(sigTypes []Type, otherSigTypes [][]Type) bool {
 func getParamTypes(typeAtoms []TypeAtom, ns *Namespace) ([]Type, error) {
 	types := make([]Type, len(typeAtoms))
 	for i, ta := range typeAtoms {
-		t := ns.GetType(ta.Name, ta.Namespace)
+		t := ns.GetType(ta)
 		if t == nil {
 			return nil, msg(ta.Line, ta.Column, "Parameter has unknown type:"+string(ta.Name)+"/"+string(ta.Namespace))
 		}

@@ -36,14 +36,21 @@ func lex(code string) ([]Token, error) {
 			line++
 			column = 1
 			i++
-		} else if r == '/' && runes[i+1] == '/' { // start of a comment?
-			i += 2
-			for runes[i] != '\n' {
-				column++
-				i++
+		} else if r == '\r' {
+			if runes[i+1] != '\n' {
+				return nil, errors.New("File improperly contains a CR not followed by a LF at end of line " + itoa(line))
 			}
 			tokens = append(tokens, Token{Newline, "\n", line, column})
+			line++
+			column = 1
+			i += 2
+		} else if r == '/' && runes[i+1] == '/' { // start of a comment
+			i += 2
+			for runes[i] != '\n' {
+				i++
+			}
 			i++
+			tokens = append(tokens, Token{Newline, "\n", line, column})
 			line++
 			column = 1
 		} else if r == '(' {
