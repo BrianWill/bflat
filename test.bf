@@ -1,4 +1,4 @@
-(ns something.test)
+something.test
 
 (func main
     (var b Bar)

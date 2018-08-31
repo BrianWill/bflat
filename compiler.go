@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"io/ioutil"
-	"log"
 	"math"
 	"os"
 	"strconv"
@@ -54,7 +53,7 @@ func getNSNameShort(namespace NSNameFull) NSNameShort {
 	return NSNameShort(namespace[strings.LastIndex(string(namespace), ".")+1:])
 }
 
-func compileNamespace(namespace NSNameFull, basedir string, namespaces map[NSNameFull]*Namespace) error {
+func compileNamespace(namespace NSNameFull, nsFileLookup map[NSNameFull][]string, namespaces map[NSNameFull]*Namespace) error {
 	if _, ok := namespaces[namespace]; ok {
 		return errors.New("Recursive import depedency: " + string(namespace))
 	}
@@ -67,50 +66,54 @@ func compileNamespace(namespace NSNameFull, basedir string, namespaces map[NSNam
 		Imports: []ImportDef{},
 	}
 
-	files, err := ioutil.ReadDir(basedir)
-	if err != nil {
-		log.Fatal(err)
+	if len(nsFileLookup[namespace]) == 0 {
+		return errors.New("No source files found for namespace: " + string(namespace))
 	}
 
-	namespaceShortName := getNSNameShort(namespace)
-	hasMain := false
-	prefix := string(namespaceShortName) + "_"
-	for _, file := range files {
-		name := file.Name()
-		isMain := name == string(namespaceShortName)+".bf"
-		if isMain {
-			hasMain = true
+	for i, file := range nsFileLookup[namespace] {
+
+		data, err := ioutil.ReadFile(file)
+		if err != nil {
+			return err
 		}
-		if isMain || (strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".bf")) {
+		data = append(data, '\n', '\n', '\n', '\n')
 
-			data, err := ioutil.ReadFile(basedir + "/" + name)
-			if err != nil {
-				return err
+		// find first blank line
+		var blankIdx int
+		for i := 0; i < len(data); i++ {
+			if data[i] == '\n' && data[i+1] == '\n' {
+				blankIdx = i
+				break
 			}
-			data = append(data, '\n')
-
-			tokens, err := lex(string(data))
-			if err != nil {
-				return err
-			}
-
-			atoms, err := read(tokens)
-			if err != nil {
-				return err
-			}
-
-			err = parse(atoms, topDefs, isMain)
-			if err != nil {
-				return err
+			if data[i] == '\r' && data[i+1] == '\n' && data[i+2] == '\r' && data[i+3] == '\n' {
+				blankIdx = i
+				break
 			}
 		}
+		if blankIdx == 0 {
+			return errors.New("Expecting blank line in file after namespace name: " + file)
+		}
+
+		data = data[blankIdx:]
+
+		tokens, err := lex(string(data))
+		if err != nil {
+			return err
+		}
+
+		atoms, err := read(tokens)
+		if err != nil {
+			return err
+		}
+
+		err = parse(atoms, topDefs, i == 0)
+		if err != nil {
+			return err
+		}
+
 	}
 
-	if !hasMain {
-		return errors.New("Cannot compile namespace '" + string(namespace) + "': expecting a file named '" + string(namespaceShortName) + ".bf'")
-	}
-
-	ns, err := createNamespace(topDefs, namespace, basedir, namespaces)
+	ns, err := createNamespace(topDefs, namespace, nsFileLookup, namespaces)
 	if err != nil {
 		return err
 	}
@@ -121,7 +124,7 @@ func compileNamespace(namespace NSNameFull, basedir string, namespaces map[NSNam
 		return err
 	}
 
-	outputFilename := string(namespaceShortName) + ".cs"
+	outputFilename := string(namespace) + ".cs"
 	err = ioutil.WriteFile(outputFilename, []byte(code), os.ModePerm)
 	if err != nil {
 		return err
@@ -775,11 +778,11 @@ func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
 	var code string
 	switch f.AccessLevel {
 	case PublicAccess:
-		code = "public "
+		code = "public class "
 	case PrivateAccess:
-		code = "private "
+		code = "private class "
 	case ProtectedAccess:
-		code = "protected "
+		code = "protected class "
 	}
 	if f.Type.Namespace != "" {
 		return "", msg(f.Line, f.Column, "Class name in its definition should not be qualified by namespace.")
@@ -921,11 +924,11 @@ func compileInterface(def InterfaceDef, ns *Namespace, indent string) (string, e
 	var code string
 	switch def.AccessLevel {
 	case PublicAccess:
-		code = "public "
+		code = "public interface "
 	case PrivateAccess:
-		code = "private "
+		code = "private interface "
 	case ProtectedAccess:
-		code = "protected "
+		code = "protected interface "
 	}
 	code += string(interfaceInfo.Name)
 	if len(interfaceInfo.Parents) > 0 {

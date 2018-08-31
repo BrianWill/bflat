@@ -13,7 +13,7 @@ public class _Funcs {
 	}
 }
 
-public Monkey : Something.Test.Bar, Something.Test.Eater {
+public class Monkey : Something.Test.Bar, Something.Test.Eater {
 	public void david() {
 		string s = Something.Test.Bar.rubber;
 		this.zelda = (float) 6.0;
@@ -22,7 +22,7 @@ public Monkey : Something.Test.Bar, Something.Test.Eater {
 	}
 }
 
-public Bar {
+public class Bar {
 	public static string rubber;
 	public float zelda = (float) 35.0;
 
@@ -40,7 +40,7 @@ public Bar {
 	}
 }
 
-public Eater {
+public interface Eater {
 	public void david(Something.Test.Eater);
 }
 

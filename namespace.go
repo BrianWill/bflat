@@ -142,7 +142,7 @@ func (ns *Namespace) HasName(short ShortName) bool {
 	return false
 }
 
-func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, namespaces map[NSNameFull]*Namespace) (*Namespace, error) {
+func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NSNameFull][]string, namespaces map[NSNameFull]*Namespace) (*Namespace, error) {
 	if topDefs.Namespace.Name == "" {
 		return nil, errors.New("Namespace '" + string(namespace) + "' missing its namespace declaration.")
 	}
@@ -187,7 +187,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 
 		foreign, ok := namespaces[importDef.Namespace]
 		if !ok {
-			err := compileNamespace(importDef.Namespace, basedir, namespaces)
+			err := compileNamespace(importDef.Namespace, nsFileLookup, namespaces)
 			if err != nil {
 				return nil, err
 			}

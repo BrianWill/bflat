@@ -3,8 +3,11 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,6 +20,8 @@ type Token struct {
 
 const thisWord = "me"
 const IndentSpaces = 4
+const directoryPrefix = "bf."
+const fileSuffix = ".bf"
 
 // not including nil, true, false, and the operators
 var reservedWords = []string{
@@ -801,7 +806,13 @@ func main() {
 
 	start := time.Now()
 
-	err := compileNamespace(namespace, directory, map[NSNameFull]*Namespace{})
+	nsFileLookup := map[NSNameFull][]string{}
+	err := buildNamespaceFileLookup(directory, nsFileLookup)
+	if err != nil {
+		fmt.Println(errors.New("Cannot find or read files of namespace: " + string(namespace) + err.Error()))
+		return
+	}
+	err = compileNamespace(namespace, nsFileLookup, map[NSNameFull]*Namespace{})
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -819,4 +830,123 @@ func sourceDirectory(basedir string) map[string][]string {
 func msg(line int, column int, s string) error {
 	return errors.New("Line " + strconv.Itoa(line) + ", column " +
 		strconv.Itoa(column) + ": " + s)
+}
+
+// namespace is expected on first line with no leading whitespace
+func fileReadNamespace(file string) (NSNameFull, error) {
+	data, err := ioutil.ReadFile(file)
+	if err != nil {
+		return "", err
+	}
+	data = append(data, '\n', '\n')
+
+	firstNewline := 0
+	for i := 0; i < len(data); i++ {
+		if data[i] == '\n' {
+			firstNewline = i
+			break
+		}
+		if data[i] == '\r' && data[i+1] == '\n' {
+			firstNewline = i
+			break
+		}
+	}
+
+	data = data[:firstNewline]
+
+	str := strings.Trim(string(data), " \t")
+
+	if !isNamespaceFull(str) {
+		return "", errors.New("First line of source file does not begin with properly formed namespace name.")
+	}
+
+	return NSNameFull(str), nil
+}
+
+func isNamespaceFull(ns string) bool {
+	data := []byte(ns)
+	componentStart := true
+	for i := 0; i < len(data); i++ {
+		if data[i] == '.' {
+			componentStart = false
+			continue
+		}
+		if componentStart {
+			// is not lowercase alpha
+			if data[i] < 'a' && data[i] > 'z' {
+				return false
+			}
+			componentStart = false
+		} else {
+			if data[i] == ' ' || data[i] == '\r' || data[i] == '\t' || data[i] == '\n' {
+				return true
+			}
+			if data[i] >= 'a' && data[i] <= 'z' {
+				continue
+			}
+			if data[i] >= 'A' && data[i] <= 'Z' {
+				continue
+			}
+			if data[i] >= '0' && data[i] <= '9' {
+				continue
+			}
+			if data[i] == '.' {
+				componentStart = true
+				continue
+			}
+		}
+	}
+	return true
+}
+
+func buildNamespaceFileLookup(dir string, nsFileLookup map[NSNameFull][]string) error {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	nsNames := map[NSNameShort]NSNameFull{}
+	for _, file := range files {
+		name := file.Name()
+		if !file.IsDir() && strings.Index(name, "_") == -1 && strings.HasSuffix(name, fileSuffix) {
+			if len(name) == len(fileSuffix) {
+				continue
+			}
+			nsName, err := fileReadNamespace(name)
+			if err != nil {
+				return err
+			}
+			shortName := getNSNameShort(nsName)
+			if name[:len(name)-len(fileSuffix)] != string(shortName) {
+				return errors.New("Source file has wrong name for its declared namespace: " + name)
+			}
+			if len(nsFileLookup[nsName]) != 0 {
+				return errors.New("Found more than one set of source files for namespace: " + string(nsName))
+			}
+			nsFileLookup[nsName] = append(nsFileLookup[nsName], dir+"/"+name)
+			nsNames[shortName] = nsName
+		}
+	}
+
+	for _, file := range files {
+		name := file.Name()
+		idx := strings.Index(name, "_")
+		if !file.IsDir() && idx != 1 && strings.HasSuffix(name, fileSuffix) {
+			if nsName, ok := nsNames[NSNameShort(name[idx:])]; ok {
+				nsFileLookup[nsName] = append(nsFileLookup[nsName], dir+"/"+name)
+			} else {
+				return errors.New("Source file has no main source file of matching name: " + name)
+			}
+		}
+	}
+
+	// recurse into directories starting with special directory prefix
+	for _, file := range files {
+		if file.IsDir() && strings.HasPrefix(file.Name(), directoryPrefix) {
+			err := buildNamespaceFileLookup(dir+"/"+file.Name(), nsFileLookup)
+			if err != nil {
+				return nil
+			}
+		}
+	}
+	return nil
 }

@@ -1,4 +1,4 @@
-(ns otherspace)
+otherspace
 
 (func tracy
     (var i 3)

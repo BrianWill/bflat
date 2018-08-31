@@ -1,5 +1,20 @@
+start lexing only after first blank line
+
+
+
+
+
+
+
+
+
 
 - account for member access levels
+
+
+
+- build up full directory of source file paths under the base directory at the beginning
+        check for namespace name conflicts
 
 
 
