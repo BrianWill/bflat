@@ -71,19 +71,6 @@ func parse(readerData []Atom, topDefs *TopDefs, isMain bool) error {
 				}
 				topDefs.Globals = append(topDefs.Globals, global)
 				annotations = []AnnotationForm{} // reset to empty slice
-			case "ns":
-				if !isMain {
-					return msg(first.Line, first.Column, "Namespace should only be declared in the main source file of the namespace.")
-				}
-				if topDefs.Namespace.Name != "" {
-					return errors.New("Cannot have more than one namespace declaration in a file: " + spew.Sdump(atom))
-				}
-				ns, err := parseNamespaceDef(atom, annotations)
-				if err != nil {
-					return err
-				}
-				topDefs.Namespace = ns
-				annotations = []AnnotationForm{} // reset to empty slice
 			case "import":
 				if !isMain {
 					return msg(first.Line, first.Column, "Imports should only go in the main source file of the namespace.")
@@ -528,55 +515,6 @@ func parseImportDef(parens ParenList, annotations []AnnotationForm) (ImportDef, 
 		Shortname:   NSNameShort(shortname),
 		Exclusions:  exclusions,
 		Aliases:     aliases,
-		Annotations: annotations,
-	}, nil
-}
-
-func parseNamespaceDef(parens ParenList, annotations []AnnotationForm) (NamespaceDef, error) {
-	atoms := parens.Atoms
-	if len(atoms) != 2 {
-		return NamespaceDef{}, errors.New("Invalid namespace form. Too many atoms. " + spew.Sdump(atoms))
-	}
-	var name NSNameFull
-	switch atom := atoms[1].(type) {
-	case Symbol:
-		if atom.Content == strings.Title(atom.Content) {
-			return NamespaceDef{}, errors.New("Invalid namespace form: name cannot start with uppercase letter. " + spew.Sdump(atoms))
-		}
-		name = NSNameFull(atom.Content)
-	case AtomChain:
-		if len(atom.Atoms)%2 == 0 {
-			return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
-		}
-		for i, atom := range atom.Atoms {
-			if i%2 == 0 {
-				if symbol, ok := atom.(Symbol); ok {
-					if symbol.Content == strings.Title(symbol.Content) {
-						return NamespaceDef{}, errors.New("Invalid namespace form. Components of namespace name must start with lowercase letters. " + spew.Sdump(atoms))
-					}
-					name += NSNameFull(symbol.Content)
-				} else {
-					return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
-				}
-			} else {
-				if sigil, ok := atom.(SigilAtom); ok {
-					if sigil.Content != "." {
-						return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
-					}
-					name += NSNameFull(".")
-				} else {
-					return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
-				}
-			}
-		}
-	default:
-		return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
-	}
-
-	return NamespaceDef{
-		Name:        name,
-		Line:        parens.Line,
-		Column:      parens.Column,
 		Annotations: annotations,
 	}, nil
 }

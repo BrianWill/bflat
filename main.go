@@ -681,7 +681,6 @@ func (a StringAtom) Atom() {}
 func (a SigilAtom) Atom()  {}
 
 type TopDefs struct {
-	Namespace  NamespaceDef
 	Classes    []ClassDef
 	Structs    []StructDef
 	Interfaces []InterfaceDef
@@ -821,12 +820,6 @@ func main() {
 	debug("Time: ", time.Since(start))
 }
 
-// within a base directory, get all the source files mapped to their namespace
-func sourceDirectory(basedir string) map[string][]string {
-	// todo
-	return nil
-}
-
 func msg(line int, column int, s string) error {
 	return errors.New("Line " + strconv.Itoa(line) + ", column " +
 		strconv.Itoa(column) + ": " + s)
@@ -839,7 +832,6 @@ func fileReadNamespace(file string) (NSNameFull, error) {
 		return "", err
 	}
 	data = append(data, '\n', '\n')
-
 	firstNewline := 0
 	for i := 0; i < len(data); i++ {
 		if data[i] == '\n' {
@@ -851,19 +843,14 @@ func fileReadNamespace(file string) (NSNameFull, error) {
 			break
 		}
 	}
-
-	data = data[:firstNewline]
-
-	str := strings.Trim(string(data), " \t")
-
-	if !isNamespaceFull(str) {
+	str := strings.Trim(string(data[:firstNewline]), " \t")
+	if !isFullNamespace(str) {
 		return "", errors.New("First line of source file does not begin with properly formed namespace name.")
 	}
-
 	return NSNameFull(str), nil
 }
 
-func isNamespaceFull(ns string) bool {
+func isFullNamespace(ns string) bool {
 	data := []byte(ns)
 	componentStart := true
 	for i := 0; i < len(data); i++ {
@@ -930,7 +917,7 @@ func buildNamespaceFileLookup(dir string, nsFileLookup map[NSNameFull][]string) 
 	for _, file := range files {
 		name := file.Name()
 		idx := strings.Index(name, "_")
-		if !file.IsDir() && idx != 1 && strings.HasSuffix(name, fileSuffix) {
+		if !file.IsDir() && idx != -1 && strings.HasSuffix(name, fileSuffix) {
 			if nsName, ok := nsNames[NSNameShort(name[idx:])]; ok {
 				nsFileLookup[nsName] = append(nsFileLookup[nsName], dir+"/"+name)
 			} else {

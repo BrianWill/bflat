@@ -143,12 +143,6 @@ func (ns *Namespace) HasName(short ShortName) bool {
 }
 
 func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NSNameFull][]string, namespaces map[NSNameFull]*Namespace) (*Namespace, error) {
-	if topDefs.Namespace.Name == "" {
-		return nil, errors.New("Namespace '" + string(namespace) + "' missing its namespace declaration.")
-	}
-	if topDefs.Namespace.Name != namespace {
-		return nil, errors.New("Namespace '" + string(namespace) + "' declaration does not match expected name.")
-	}
 
 	nsNameComponents := strings.Split(string(namespace), ".")
 	var shortName NSNameShort
