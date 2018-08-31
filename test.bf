@@ -1,4 +1,4 @@
-(ns test)
+(ns something.test)
 
 (func main
     (var b Bar)
@@ -11,23 +11,27 @@
     //(lisa Bar)
 )
 
+(global foo Str `234`)
 
 (class Monkey : Bar Eater
-
     (m david
-        (var i 3)
-        (as i 5)
+        (var s Str [rubber Bar])
         (as [zelda] 6.0)
         (lisa me)
+        (var b (Bar))
     )
+
 )
 
 (interface Eater
-    (m david))
+    (m david)
+    //(m david : I) // should be error because indistinguishable from previous overload
+)
 
 
 
 (class Bar
+    (f -static rubber Str)
     (f zelda F 35.0)
 
     (m lisa
@@ -41,8 +45,8 @@
         //(lisa me)
     )
 
-        (constructor : a Str
-        (var i Str             a         )
+    (constructor : a Str
+        (var i Str)
         (as i `jsidfj`)
     )
 )

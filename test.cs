@@ -1,45 +1,47 @@
-namespace test {
+namespace Something.Test {
 
 public class _Globals {
+	public string foo = "234";
 }
 
 public class _Funcs {
 	public static void main() {
-		Test.Bar _b;
-		_b = new Test.Bar();
-		int[] _x;
-		_x = new int[6];
+		Something.Test.Bar b;
+		b = new Something.Test.Bar();
+		int[] x;
+		x = new int[6];
 	}
 }
 
-public Monkey : Test.Bar, Test.Eater {
+public Monkey : Something.Test.Bar, Something.Test.Eater {
 	public void david() {
-		int _i = 3;
-		_i = 5;
+		string s = Something.Test.Bar.rubber;
 		this.zelda = (float) 6.0;
 		this.lisa();
+		Something.Test.Bar b = new Something.Test.Bar();
 	}
 }
 
 public Bar {
+	public static string rubber;
 	public float zelda = (float) 35.0;
 
 	public Bar() {
-		int _i = 3;
-		_i = 5;
+		int i = 3;
+		i = 5;
 	}
-	public Bar(_a string) {
-		string _i = _a;
-		_i = "jsidfj";
+	public Bar(a string) {
+		string i;
+		i = "jsidfj";
 	}
 	public void lisa() {
-		byte _i = (byte) 3;
-		_i = (byte) 5;
+		byte i = (byte) 3;
+		i = (byte) 5;
 	}
 }
 
 public Eater {
-	public void david(Test.Eater);
+	public void david(Something.Test.Eater);
 }
 
 }

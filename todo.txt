@@ -1,12 +1,16 @@
-- account for checking A as subtype of interface B when A implements a descendent interface of B
-
-
-
-- check for name collisions between namespace qualified names and locals, e.g. foo.Bar and foo (is c# smart about this?)
-
-    (maybe just underscore prefix all namespace names in csharp)
 
 - account for member access levels
+
+
+
+- account for conflicting overloads in subclasses, subinterfaces 
+        (does C# allow subclass to create overload that effectively hides parent?)
+
+- should require -override (and generate "override" keyword) for overriding methods
+
+
+- out and ref params
+
 
 
 
@@ -14,19 +18,14 @@
 - properties
 
 
-- static methods and fields
-
-    todo: should account for namespace of classes
-
-
 - generics
 
 
-
-- when building InterfaceInfo, allow for method overloads, e.g. multiple methods named 'foo' in single interface
-
-
 - indexer methods
+
+
+- walk bf. directories to find namespace source files
+- allow for . in namespace name in ns form
 
 (ns red.orange.blue)      // 'blue' is the short name; (in C#, equivalent of Red.Orange.Blue) 
 

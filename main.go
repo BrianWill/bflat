@@ -148,7 +148,6 @@ type GlobalDef struct {
 	Line        int
 	Column      int
 	Name        ShortName
-	StaticClass string
 	Type        TypeAtom
 	Value       Expression
 	Annotations []AnnotationForm
@@ -524,12 +523,14 @@ type FieldDef struct {
 	AccessLevel AccessLevel
 	Annotations []AnnotationForm
 	Value       Expression
+	IsStatic    bool
 }
 
 type FieldInfo struct {
 	Name        ShortName
 	Type        Type
 	AccessLevel AccessLevel
+	Static      Type
 }
 
 type StructDef struct {
@@ -779,7 +780,7 @@ func main() {
 	var namespace NSNameFull
 	if debugMode {
 		directory = "."
-		namespace = "test"
+		namespace = "something.test"
 	} else {
 		if len(os.Args) < 2 {
 			fmt.Println("Must specify a namespace (short name) and directory.")

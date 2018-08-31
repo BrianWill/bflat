@@ -159,7 +159,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		}
 		csName += strings.Title(component)
 		if i < len(nsNameComponents)-1 {
-			csName += ", "
+			csName += "."
 		} else {
 			shortName = NSNameShort(component)
 		}
@@ -178,6 +178,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 		Funcs:        map[ShortName][]*CallableInfo{},
 		Methods:      map[ShortName][]*CallableInfo{},
 	}
+	ns.Imports[shortName] = ns
 
 	for _, importDef := range topDefs.Imports {
 		if _, ok := ns.Imports[importDef.Shortname]; ok {
@@ -385,10 +386,17 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, basedir string, nam
 			if t == nil {
 				return nil, msg(f.Line, f.Column, "Field has unknown type.")
 			}
+
+			var staticType Type
+			if f.IsStatic {
+				staticType = classInfo
+			}
+
 			classInfo.Fields[f.Name] = FieldInfo{
 				Name:        f.Name,
 				Type:        t,
 				AccessLevel: f.AccessLevel,
+				Static:      staticType,
 			}
 		}
 
@@ -725,15 +733,17 @@ func getParamTypes(typeAtoms []TypeAtom, ns *Namespace) ([]Type, error) {
 
 // returns true if field exists
 // todo: account for access level
-func GetFieldType(field ShortName, t Type) (Type, bool) {
+func GetFieldType(field ShortName, t Type, static bool) (Type, bool) {
 	switch t := t.(type) {
 	case *ClassInfo:
 		// must search ancestors as well as the class itself
 		for {
 			if fieldInfo, ok := t.Fields[field]; ok {
-				return fieldInfo.Type, true
+				if (static && fieldInfo.Static != nil) || (!static && fieldInfo.Static == nil) {
+					return fieldInfo.Type, true
+				}
 			}
-			if t.Parent == nil {
+			if t.Parent == nil || static {
 				break
 			}
 			t = t.Parent
@@ -741,7 +751,9 @@ func GetFieldType(field ShortName, t Type) (Type, bool) {
 		return nil, false
 	case *StructInfo:
 		if fieldInfo, ok := t.Fields[field]; ok {
-			return fieldInfo.Type, true
+			if (static && fieldInfo.Static != nil) || (!static && fieldInfo.Static == nil) {
+				return fieldInfo.Type, true
+			}
 		} else {
 			return nil, false
 		}

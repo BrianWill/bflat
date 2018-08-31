@@ -303,6 +303,13 @@ func parseField(parens ParenList, annotations []AnnotationForm) (FieldDef, error
 	if idx >= len(atoms) {
 		return FieldDef{}, errors.New("Expecting field name: " + spew.Sdump(parens))
 	}
+	if parseFlag(atoms[idx], "static") {
+		field.IsStatic = true
+		idx++
+		if idx >= len(atoms) {
+			return FieldDef{}, errors.New("Expecting field name: " + spew.Sdump(parens))
+		}
+	}
 	symbol, ok := atoms[idx].(Symbol)
 	if !ok {
 		return FieldDef{}, errors.New("Expecting field name: " + spew.Sdump(parens))
@@ -530,24 +537,53 @@ func parseNamespaceDef(parens ParenList, annotations []AnnotationForm) (Namespac
 	if len(atoms) != 2 {
 		return NamespaceDef{}, errors.New("Invalid namespace form. Too many atoms. " + spew.Sdump(atoms))
 	}
-	symbol, ok := atoms[1].(Symbol)
-	if !ok {
-		return NamespaceDef{}, errors.New("Invalid namespace form. Expecting symbol. " + spew.Sdump(atoms))
+	var name NSNameFull
+	switch atom := atoms[1].(type) {
+	case Symbol:
+		if atom.Content == strings.Title(atom.Content) {
+			return NamespaceDef{}, errors.New("Invalid namespace form: name cannot start with uppercase letter. " + spew.Sdump(atoms))
+		}
+		name = NSNameFull(atom.Content)
+	case AtomChain:
+		if len(atom.Atoms)%2 == 0 {
+			return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
+		}
+		for i, atom := range atom.Atoms {
+			if i%2 == 0 {
+				if symbol, ok := atom.(Symbol); ok {
+					if symbol.Content == strings.Title(symbol.Content) {
+						return NamespaceDef{}, errors.New("Invalid namespace form. Components of namespace name must start with lowercase letters. " + spew.Sdump(atoms))
+					}
+					name += NSNameFull(symbol.Content)
+				} else {
+					return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
+				}
+			} else {
+				if sigil, ok := atom.(SigilAtom); ok {
+					if sigil.Content != "." {
+						return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
+					}
+					name += NSNameFull(".")
+				} else {
+					return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
+				}
+			}
+		}
+	default:
+		return NamespaceDef{}, errors.New("Invalid namespace form. Expecting one or more symbols connected by dots. " + spew.Sdump(atoms))
 	}
-	if symbol.Content == strings.Title(symbol.Content) {
-		return NamespaceDef{}, errors.New("Invalid namespace form: name cannot start with uppercase letter. " + spew.Sdump(atoms))
-	}
+
 	return NamespaceDef{
-		Name:        NSNameFull(symbol.Content),
-		Line:        symbol.Line,
-		Column:      symbol.Column,
+		Name:        name,
+		Line:        parens.Line,
+		Column:      parens.Column,
 		Annotations: annotations,
 	}, nil
 }
 
 // expects / sigil followed by one or more symbols separated by dots
 func parseNamespace(atoms []Atom, line int, column int) (string, error) {
-	if len(atoms) < 2 {
+	if len(atoms) != 2 {
 		return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 	}
 	if sigil, ok := atoms[0].(SigilAtom); ok {
@@ -557,34 +593,25 @@ func parseNamespace(atoms []Atom, line int, column int) (string, error) {
 	} else {
 		return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 	}
-	strs := []string{}
-	for i, atom := range atoms[1:] {
-		if i%2 == 0 {
-			if symbol, ok := atom.(Symbol); ok {
-				if symbol.Content != strings.Title(symbol.Content) {
-					return "", errors.New("Improperly formed namespace qualifier (namspace cannot begin with uppercase): line " + itoa(line) + " column " + itoa(column))
-				}
-				strs = append(strs, symbol.Content)
-			} else {
-				return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
-			}
-		} else {
-			if sigil, ok := atom.(SigilAtom); ok {
-				if sigil.Content != "." {
-					return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
-				}
-			} else {
-				return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
-			}
+
+	if symbol, ok := atoms[1].(Symbol); ok {
+		if symbol.Content == strings.Title(symbol.Content) {
+			return "", errors.New("Improperly formed namespace qualifier (namspace cannot begin with uppercase): line " + itoa(line) + " column " + itoa(column))
 		}
+		return symbol.Content, nil
+	} else {
+		return "", errors.New("Improperly formed namespace qualifier: line " + itoa(line) + " column " + itoa(column))
 	}
-	return strings.Join(strs, "."), nil
 }
 
 func parseExpression(atom Atom) (Expression, error) {
 	varExpr, err := parseVarExpression(atom)
 	if err == nil { // if no error, then VarExpression
 		return varExpr, nil
+	}
+	typeExpr, err := parseTypeAtom(atom)
+	if err == nil { // if no error, then TypeAtom
+		return typeExpr, nil
 	}
 	var expr Expression
 	switch atom := atom.(type) {
@@ -1248,6 +1275,9 @@ func parseVar(atoms []Atom, line int, column int) (VarForm, error) {
 		if errType != nil && errVal != nil {
 			return VarForm{}, msg(atoms[2].GetLine(), atoms[2].GetColumn(), "Var form expecting expression or type.")
 		}
+		if errType == nil && errVal == nil {
+			varForm.Value = nil
+		}
 	} else {
 		if errType != nil {
 			return VarForm{}, errType
@@ -1383,18 +1413,6 @@ func parseGlobal(parens ParenList, annotations []AnnotationForm) (GlobalDef, err
 	}
 	atoms := parens.Atoms
 	idx := 1
-	if parseFlag(atoms[idx], "static") {
-		idx++
-		if symbol, ok := atoms[idx].(Symbol); ok {
-			if symbol.Content != strings.Title(symbol.Content) {
-				return GlobalDef{}, errors.New("Invalid class name for static global (must begin with uppercase letter)." + spew.Sdump(parens))
-			}
-			globalDef.StaticClass = symbol.Content
-		} else {
-			return GlobalDef{}, errors.New("Expecting class name for static global." + spew.Sdump(parens))
-		}
-		idx++
-	}
 	if idx >= len(atoms) {
 		return GlobalDef{}, errors.New("Invalid global: " + spew.Sdump(parens))
 	}
@@ -1508,25 +1526,27 @@ func parseMethodSignature(parens ParenList) (paramTypes []TypeAtom, returnType T
 	if err == nil {
 		returnType = dataType
 		idx++
+	} else {
+		err = nil
 	}
-	if len(atoms) <= idx {
-		err = errors.New("Incomplete method definition: " + spew.Sdump(parens))
-		return
-	}
-	// params
 
-	if sigil, ok := atoms[idx].(SigilAtom); ok {
-		if sigil.Content != ":" {
-			err = errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
-			return
-		}
-		idx++
-		for _, atom := range atoms[idx:] {
-			dataType, err := parseTypeAtom(atom)
-			if err != nil {
-				return nil, TypeAtom{}, "", errors.New("Invalid parameter type: " + spew.Sdump(atom))
+	if idx < len(atoms) {
+		if sigil, ok := atoms[idx].(SigilAtom); ok {
+			if sigil.Content != ":" {
+				err = errors.New("Invalid sigil (expecting colon): " + spew.Sdump(parens))
+				return
 			}
-			paramTypes = append(paramTypes, dataType)
+			idx++
+			for _, atom := range atoms[idx:] {
+				dataType, err := parseTypeAtom(atom)
+				if err != nil {
+					return nil, TypeAtom{}, "", errors.New("Invalid parameter type: " + spew.Sdump(atom))
+				}
+				paramTypes = append(paramTypes, dataType)
+			}
+		} else {
+			err = errors.New("Invalid method signature (expecting colon): " + spew.Sdump(parens))
+			return
 		}
 	}
 	return

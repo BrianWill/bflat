@@ -11,7 +11,7 @@ import (
 )
 
 func codeGen(topDefs *TopDefs, ns *Namespace) (string, error) {
-	code := "namespace " + string(ns.Name) + " {\n\n"
+	code := "namespace " + string(ns.CSName) + " {\n\n"
 
 	c, err := compileGlobals(topDefs.Globals, ns, "\t")
 	if err != nil {
@@ -222,7 +222,7 @@ func compileExpression(expr Expression, ns *Namespace, expectedType Type,
 			if expr.Name == thisWord {
 				code = "this"
 			} else {
-				code = "_" + string(expr.Name) // use _ prefix to avoid name conflicts with namespaces
+				code = string(expr.Name)
 			}
 			return
 		}
@@ -305,7 +305,7 @@ func compileExpression(expr Expression, ns *Namespace, expectedType Type,
 			return "", nil, msg(expr.Line, expr.Column, "Non-number type given as expected type for a number literal.")
 		}
 	case StringAtom:
-		code = "\"" + expr.Content[1:len(expr.Content)-1] + "\""
+		code = "\"" + escapeString(expr.Content[1:len(expr.Content)-1]) + "\""
 		dt = StrType
 	case CallForm:
 		code, dt, err = compileCallForm(expr, ns, expectedType, locals)
@@ -351,6 +351,31 @@ func compileGlobals(globals []GlobalDef, ns *Namespace, indent string) (string, 
 	}
 	code += "}\n\n"
 	return code, nil
+}
+
+func escapeString(str string) string {
+	src := []rune(str)
+	dest := make([]rune, 0, len(src))
+	for i := 0; i < len(src); {
+		switch src[i] {
+		case '\n':
+			dest = append(dest, '\\', 'n')
+			i++
+		case '\r':
+			dest = append(dest, '\\', 'n')
+			i += 2 // skip over the \n that follows the \r
+		case '\t':
+			dest = append(dest, '\\', 't')
+			i++
+		case '"':
+			dest = append(dest, '\\', '"')
+			i++
+		default:
+			dest = append(dest, src[i])
+			i++
+		}
+	}
+	return string(dest)
 }
 
 // assumes a valid data type. Accepts Struct but not a StructDefinition
@@ -476,9 +501,7 @@ func compileBody(statements []Statement, returnType Type,
 				if t == nil {
 					return "", msg(f.Line, f.Column, "Var form specifies unknown type.")
 				}
-				typeStr = compileType(t)
-			} else {
-				typeStr = "var "
+				typeStr = compileType(t) + " "
 			}
 			valStr := ""
 			var exprType Type
@@ -488,15 +511,15 @@ func compileBody(statements []Statement, returnType Type,
 					return "", err
 				}
 				if t == nil {
-					typeStr = compileType(exprType)
+					typeStr = compileType(exprType) + " "
 				} else if !IsSubType(exprType, t) {
 					return "", msg(f.Line, f.Column, "Initial value in var statement is wrong type.")
 				}
 			}
 			if valStr == "" {
-				c = indent + typeStr + " _" + string(f.Target) + ";\n"
+				c = indent + typeStr + string(f.Target) + ";\n"
 			} else {
-				c = indent + typeStr + " _" + string(f.Target) + " = " + valStr + ";\n"
+				c = indent + typeStr + string(f.Target) + " = " + valStr + ";\n"
 			}
 			if t == nil {
 				locals[f.Target] = exprType
@@ -515,9 +538,21 @@ func compileBody(statements []Statement, returnType Type,
 func compileIndexingForm(f IndexingForm, ns *Namespace,
 	locals map[ShortName]Type) (code string, dt Type, err error) {
 
-	code, dt, err = compileExpression(f.Args[len(f.Args)-1], ns, nil, locals)
-	if err != nil {
-		return
+	last := f.Args[len(f.Args)-1]
+	static := false
+	if ta, ok := last.(TypeAtom); ok {
+		dt = ns.GetType(ta)
+		if dt == nil {
+			err = msg(f.Line, f.Column, "Indexing form references unknown type.")
+			return
+		}
+		code = compileType(dt)
+		static = true
+	} else {
+		code, dt, err = compileExpression(last, ns, nil, locals)
+		if err != nil {
+			return
+		}
 	}
 	for i := len(f.Args) - 2; i >= 0; i-- {
 		expr := f.Args[i]
@@ -540,7 +575,7 @@ func compileIndexingForm(f IndexingForm, ns *Namespace,
 					err = msg(varExpr.Line, varExpr.Column, "Improper name in indexing form.")
 					return
 				}
-				dt, ok = GetFieldType(varExpr.Name, dt)
+				dt, ok = GetFieldType(varExpr.Name, dt, static)
 				if !ok {
 					err = msg(varExpr.Line, varExpr.Column, "No field called '"+string(varExpr.Name)+"' in indexing form.")
 					return
@@ -564,7 +599,7 @@ func compileAssignment(f AssignmentForm, ns *Namespace, locals map[ShortName]Typ
 			var ok bool
 			dt, ok = locals[target.Name] // local name takes precedence over unqualified global name
 			if ok {
-				code = "_" + string(target.Name)
+				code = string(target.Name)
 				break
 			}
 		}
@@ -620,7 +655,7 @@ func compileFunc(f FuncDef, ns *Namespace, indent string) (string, error) {
 			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
 		locals[paramName] = paramType
-		code += "_" + string(paramName) + " " + compileType(paramType)
+		code += string(paramName) + " " + compileType(paramType)
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
@@ -653,7 +688,7 @@ func compileMethod(f MethodDef, class Type, ns *Namespace, indent string) (strin
 			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
 		locals[paramName] = paramType
-		code += "_" + string(paramName) + " " + compileType(paramType)
+		code += string(paramName) + " " + compileType(paramType)
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
@@ -685,7 +720,7 @@ func compileConstructor(f ConstructorDef, t Type, ns *Namespace, indent string) 
 			return "", msg(f.ParamTypes[i].Line, f.ParamTypes[i].Column, "Function has unknown parameter type.")
 		}
 		locals[paramName] = paramType
-		code += "_" + string(paramName) + " " + compileType(paramType)
+		code += string(paramName) + " " + compileType(paramType)
 		if i != len(f.ParamNames)-1 {
 			code += ", "
 		}
@@ -708,6 +743,9 @@ func compileField(f FieldDef, ns *Namespace, indent string) (string, error) {
 		code += "private "
 	case ProtectedAccess:
 		code += "protected "
+	}
+	if f.IsStatic {
+		code += "static "
 	}
 
 	t := ns.GetType(f.Type)
@@ -734,7 +772,6 @@ func compileProperty(p PropertyDef, ns *Namespace, indent string) (string, error
 }
 
 func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
-
 	var code string
 	switch f.AccessLevel {
 	case PublicAccess:
