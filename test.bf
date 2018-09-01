@@ -21,6 +21,13 @@ something.test
         (var b (Bar))
     )
 
+    //(f evan_ Str)
+
+    (p evan Str
+        (return [evan_])
+        -set
+        (as [evan_] value)
+    )
 )
 
 (interface Eater

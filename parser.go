@@ -763,46 +763,52 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 
 func parseProperty(parens ParenList, annotations []AnnotationForm) (PropertyDef, error) {
 	atoms := parens.Atoms
-	splitIdx := len(atoms)
-	if len(atoms) < 4 {
+	if len(atoms) < 3 {
 		return PropertyDef{}, msg(parens.Line, parens.Column, "Too few atoms in property form.")
 	}
 	propertyDef := PropertyDef{
 		Line:        parens.Line,
 		Column:      parens.Column,
 		Annotations: annotations,
+		IsManual:    false,
 	}
-	if symbol, ok := atoms[1].(Symbol); ok {
+	idx := 1
+	if parseFlag(atoms[idx], "manual") {
+		propertyDef.IsManual = true
+		idx++
+	}
+	if symbol, ok := atoms[idx].(Symbol); ok {
 		if symbol.Content == strings.Title(symbol.Content) {
 			return PropertyDef{}, errors.New("Invalid property name (cannot begin with uppercase): " + spew.Sdump(symbol))
 		}
 		propertyDef.Name = ShortName(symbol.Content)
+	} else {
+		return PropertyDef{}, errors.New("Expecting symbol name for property: " + spew.Sdump(atoms[idx]))
 	}
-	for i, atom := range atoms[3:] {
-		if chain, ok := atom.(AtomChain); ok {
-			if len(chain.Atoms) == 2 {
-				if sigil, ok := chain.Atoms[0].(SigilAtom); ok {
-					if sigil.Content == "-" {
-						if symbol, ok := chain.Atoms[1].(Symbol); ok {
-							if symbol.Content == "set" {
-								splitIdx = i + 1
-							}
-						}
-					}
-				}
-			}
+	idx++
+	var err error
+	propertyDef.Type, err = parseTypeAtom(atoms[idx])
+	if err != nil {
+		return PropertyDef{}, errors.New("Expecting type for property: " + spew.Sdump(atoms[idx]))
+	}
+	idx++
+	setFlagIdx := len(atoms)
+	for i, atom := range atoms[idx:] {
+		if parseFlag(atom, "set") {
+			setFlagIdx = i + idx
+			break
 		}
 	}
-	getBody, err := parseBody(atoms[:splitIdx])
+	propertyDef.GetBody, err = parseBody(atoms[idx:setFlagIdx])
 	if err != nil {
 		return PropertyDef{}, err
 	}
-	setBody, err := parseBody(atoms[splitIdx:])
-	if err != nil {
-		return PropertyDef{}, err
+	if setFlagIdx != len(atoms) {
+		propertyDef.SetBody, err = parseBody(atoms[setFlagIdx+1:])
+		if err != nil {
+			return PropertyDef{}, err
+		}
 	}
-	propertyDef.GetBody = getBody
-	propertyDef.SetBody = setBody
 	return propertyDef, nil
 }
 

@@ -1,9 +1,12 @@
-start lexing only after first blank line
 
+-  are method and field name collision in class a problem?
+    and what about name collisions with members of ancestor classes?
 
+- property auto creates field with same name but ending in underscore
+    
+    static
 
-
-
+    allow initial value for property like with field? how distinguish from start of getter? -val flag?
 
 
 
@@ -29,8 +32,6 @@ start lexing only after first blank line
 
 
 
-
-- properties
 
 
 - generics

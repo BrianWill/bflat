@@ -19,6 +19,7 @@ type Token struct {
 }
 
 const thisWord = "me"
+const propertyValueParam = "value"
 const IndentSpaces = 4
 const directoryPrefix = "bf."
 const fileSuffix = ".bf"
@@ -205,6 +206,7 @@ type ClassInfo struct {
 	Namespace  *Namespace
 	Parent     *ClassInfo
 	Fields     map[ShortName]FieldInfo
+	Properties map[ShortName]PropertyInfo
 	Methods    map[ShortName][]*CallableInfo
 	Interfaces []*InterfaceInfo
 	Params     []Type
@@ -214,6 +216,7 @@ type StructInfo struct {
 	Name       ShortName
 	Namespace  *Namespace
 	Fields     map[ShortName]FieldInfo
+	Properties map[ShortName]PropertyInfo
 	Methods    map[ShortName][]*CallableInfo
 	Interfaces []*InterfaceInfo
 	Params     []Type
@@ -590,9 +593,19 @@ type PropertyDef struct {
 	Column      int
 	Name        ShortName
 	Type        TypeAtom
+	IsManual    bool
+	IsStatic    bool
 	GetBody     []Statement
 	SetBody     []Statement
 	Annotations []AnnotationForm
+	AccessLevel AccessLevel
+}
+
+type PropertyInfo struct {
+	Name        ShortName
+	Type        Type
+	AccessLevel AccessLevel
+	Static      Type
 }
 
 type Atom interface {

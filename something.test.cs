@@ -14,6 +14,16 @@ public class _Funcs {
 }
 
 public class Monkey : Something.Test.Bar, Something.Test.Eater {
+	public string evan_;
+	public string evan {
+		get {
+			return this.evan_;
+		}
+		set {
+			this.evan_ = value;
+		}
+	}
+
 	public void david() {
 		string s = Something.Test.Bar.rubber;
 		this.zelda = (float) 6.0;

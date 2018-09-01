@@ -350,11 +350,11 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 		}
 	}
 
-	// init ClassInfo Parent, Interfaces, Fields, constructors, and methods
+	// init ClassInfo Parent, Interfaces, Fields, Properties, constructors, and methods
 	for _, classDef := range topDefs.Classes {
 		classInfo := ns.Classes[classDef.Type.Name] // should never be nil
 
-		interfaces := []*InterfaceInfo{}
+		classInfo.Interfaces = []*InterfaceInfo{}
 		for i, dt := range classDef.Supertypes {
 			if i == 0 {
 				parentClass := ns.GetClass(dt.Name, dt.Namespace)
@@ -370,9 +370,8 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 				}
 				return nil, msg(classDef.Line, classDef.Column, "Class implements unknown interface.")
 			}
-			interfaces = append(interfaces, interfaceInfo)
+			classInfo.Interfaces = append(classInfo.Interfaces, interfaceInfo)
 		}
-		classInfo.Interfaces = interfaces
 
 		classInfo.Fields = map[ShortName]FieldInfo{}
 		for _, f := range classDef.Fields {
@@ -386,10 +385,57 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 				staticType = classInfo
 			}
 
+			if _, ok := classInfo.Fields[f.Name]; ok {
+				return nil, msg(f.Line, f.Column, "Cannot have multiple fields of same name in a class.")
+			}
+
 			classInfo.Fields[f.Name] = FieldInfo{
 				Name:        f.Name,
 				Type:        t,
 				AccessLevel: f.AccessLevel,
+				Static:      staticType,
+			}
+		}
+
+		classInfo.Properties = map[ShortName]PropertyInfo{}
+		for _, p := range classDef.Properties {
+			t := ns.GetType(p.Type)
+			if t == nil {
+				return nil, msg(p.Line, p.Column, "Property has unknown type.")
+			}
+
+			var staticType Type
+			if p.IsStatic {
+				staticType = classInfo
+			}
+
+			if _, ok := classInfo.Fields[p.Name]; ok {
+				return nil, msg(p.Line, p.Column, "Cannot have field and property of same name in a class.")
+			}
+
+			if _, ok := classInfo.Properties[p.Name]; ok {
+				return nil, msg(p.Line, p.Column, "Cannot have multiple properties of same name in a class.")
+			}
+
+			if !p.IsManual {
+				name := p.Name + "_"
+
+				if _, ok := classInfo.Fields[name]; ok {
+					return nil, msg(p.Line, p.Column, "Field name conflicts with auto-field of property in a struct.")
+				}
+
+				classInfo.Fields[name] = FieldInfo{
+					Name:        name,
+					Type:        t,
+					AccessLevel: p.AccessLevel,
+					Static:      staticType,
+				}
+			}
+
+			classInfo.Properties[p.Name] = PropertyInfo{
+				Name:        p.Name,
+				Type:        t,
+				AccessLevel: p.AccessLevel,
 				Static:      staticType,
 			}
 		}
@@ -553,7 +599,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 		globalInfo.Type = t
 	}
 
-	// init StructInfo Interfaces, Fields, constructors, and methods
+	// init StructInfo Interfaces, Fields, Properties, constructors, and methods
 	for _, structDef := range topDefs.Structs {
 		structInfo := ns.Structs[structDef.Type.Name] // should never be nil
 
@@ -573,10 +619,64 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 			if t == nil {
 				return nil, msg(f.Line, f.Column, "Field has unknown type.")
 			}
+
+			var staticType Type
+			if f.IsStatic {
+				staticType = structInfo
+			}
+
+			if _, ok := structInfo.Fields[f.Name]; ok {
+				return nil, msg(f.Line, f.Column, "Cannot have multiple fields of same name in a struct.")
+			}
+
 			structInfo.Fields[f.Name] = FieldInfo{
 				Name:        f.Name,
 				Type:        t,
 				AccessLevel: f.AccessLevel,
+				Static:      staticType,
+			}
+		}
+
+		structInfo.Properties = map[ShortName]PropertyInfo{}
+		for _, p := range structDef.Properties {
+			t := ns.GetType(p.Type)
+			if t == nil {
+				return nil, msg(p.Line, p.Column, "Property has unknown type.")
+			}
+
+			var staticType Type
+			if p.IsStatic {
+				staticType = structInfo
+			}
+
+			if _, ok := structInfo.Fields[p.Name]; ok {
+				return nil, msg(p.Line, p.Column, "Cannot have field and property of same name in a struct.")
+			}
+
+			if _, ok := structInfo.Properties[p.Name]; ok {
+				return nil, msg(p.Line, p.Column, "Cannot have multiple properties of same name in a struct.")
+			}
+
+			if !p.IsManual {
+				name := p.Name + "_"
+
+				if _, ok := structInfo.Fields[name]; ok {
+					return nil, msg(p.Line, p.Column, "Field name conflicts with auto-field of property in a struct.")
+				}
+
+				structInfo.Fields[name] = FieldInfo{
+					Name:        name,
+					Type:        t,
+					AccessLevel: p.AccessLevel,
+					Static:      staticType,
+				}
+			}
+
+			structInfo.Properties[p.Name] = PropertyInfo{
+				Name:        p.Name,
+				Type:        t,
+				AccessLevel: p.AccessLevel,
+				Static:      staticType,
 			}
 		}
 

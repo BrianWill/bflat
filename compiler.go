@@ -769,9 +769,77 @@ func compileField(f FieldDef, ns *Namespace, indent string) (string, error) {
 	return code, nil
 }
 
-func compileProperty(p PropertyDef, ns *Namespace, indent string) (string, error) {
-	// todo
-	return "", nil
+func compileProperty(p PropertyDef, containingType Type, ns *Namespace, indent string) (string, error) {
+	var code string
+	t := ns.GetType(p.Type)
+	if t == nil {
+		return "", msg(p.Line, p.Column, "Property has unknown type.")
+	}
+
+	if p.IsManual {
+		if len(p.GetBody) == 0 {
+			return "", msg(p.Line, p.Column, "Property is manual (no auto-backing field) but is missing explicit getter.")
+		}
+
+		if len(p.SetBody) == 0 {
+			return "", msg(p.Line, p.Column, "Property is manual (no auto-backing field) but is missing explicit settter.")
+		}
+	} else {
+		code += indent
+		switch p.AccessLevel {
+		case PublicAccess:
+			code += "public "
+		case PrivateAccess:
+			code += "private "
+		case ProtectedAccess:
+			code += "protected "
+		}
+		if p.IsStatic {
+			code += "static "
+		}
+		code += compileType(t) + " " + string(p.Name) + "_;\n"
+
+	}
+
+	code += indent
+	switch p.AccessLevel {
+	case PublicAccess:
+		code += "public "
+	case PrivateAccess:
+		code += "private "
+	case ProtectedAccess:
+		code += "protected "
+	}
+	if p.IsStatic {
+		code += "static "
+	}
+
+	code += compileType(t) + " " + string(p.Name) + " {\n"
+
+	if len(p.GetBody) > 0 {
+		code += indent + "\tget {\n"
+		c, err := compileBody(p.GetBody, t, ns, map[ShortName]Type{thisWord: containingType}, false, true, indent+"\t\t")
+		if err != nil {
+			return "", err
+		}
+		code += c + indent + "\t}\n"
+	} else {
+		code += indent + "\tget {return " + string(p.Name) + "_;}\n"
+	}
+
+	if len(p.SetBody) > 0 {
+		code += indent + "\tset {\n"
+		c, err := compileBody(p.SetBody, nil, ns, map[ShortName]Type{thisWord: containingType, propertyValueParam: t}, false, false, indent+"\t\t")
+		if err != nil {
+			return "", err
+		}
+		code += c + indent + "\t}\n"
+	} else {
+		code += indent + "\tset {this." + string(p.Name) + "_ = " + propertyValueParam + ";}\n"
+	}
+	code += indent + "}\n"
+
+	return code, nil
 }
 
 func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
@@ -821,7 +889,7 @@ func compileClass(f ClassDef, ns *Namespace, indent string) (string, error) {
 		code += "\n"
 	}
 	for _, propertyDef := range f.Properties {
-		c, err := compileProperty(propertyDef, ns, "\t")
+		c, err := compileProperty(propertyDef, classInfo, ns, "\t")
 		if err != nil {
 			return "", err
 		}
@@ -887,7 +955,7 @@ func compileStruct(f StructDef, ns *Namespace) (string, error) {
 		code += c + "\n"
 	}
 	for _, propertyDef := range f.Properties {
-		c, err := compileProperty(propertyDef, ns, "\t")
+		c, err := compileProperty(propertyDef, structInfo, ns, "\t")
 		if err != nil {
 			return "", err
 		}
