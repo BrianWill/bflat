@@ -597,6 +597,8 @@ type PropertyDef struct {
 	IsStatic    bool
 	GetBody     []Statement
 	SetBody     []Statement
+	HasGetter   bool
+	HasSetter   bool
 	Annotations []AnnotationForm
 	AccessLevel AccessLevel
 }
@@ -604,6 +606,8 @@ type PropertyDef struct {
 type PropertyInfo struct {
 	Name        ShortName
 	Type        Type
+	HasGetter   bool
+	HasSetter   bool
 	AccessLevel AccessLevel
 	Static      Type
 }

@@ -1,53 +1,27 @@
 
--  are method and field name collision in class a problem?
-    and what about name collisions with members of ancestor classes?
-
-- property auto creates field with same name but ending in underscore
-    
-    static
+-  static property    
 
     allow initial value for property like with field? how distinguish from start of getter? -val flag?
 
-
-
-
+- interface properties (and fields?)
 
 - account for member access levels
 
 
 
-- build up full directory of source file paths under the base directory at the beginning
-        check for namespace name conflicts
-
-
-
-- account for conflicting overloads in subclasses, subinterfaces 
-        (does C# allow subclass to create overload that effectively hides parent?)
-
-- should require -override (and generate "override" keyword) for overriding methods
-
+- override and virtual
 
 - out and ref params
 
-
-
-
-
+- import shortname aliases
 
 - generics
-
 
 - indexer methods
 
 
-- walk bf. directories to find namespace source files
-- allow for . in namespace name in ns form
 
-(ns red.orange.blue)      // 'blue' is the short name; (in C#, equivalent of Red.Orange.Blue) 
 
-                          // file convention: shortname_file.bf
-                          // e.g. file 'foo' in namespace with shortname 'bar':
-                          //            bar_foo.bf
 
 
 

@@ -19,16 +19,21 @@ something.test
         (as [zelda] 6.0)
         (lisa me)
         (var b (Bar))
+        (as [evan me] s)
+        (as s [evan me])
     )
-
-    //(f evan_ Str)
 
     (p evan Str
-        (return [evan_])
-        -set
-        (as [evan_] value)
+        (get 
+            //(return [evan_])
+        )
+        (set
+            //(as [evan_] value)
+        )
     )
+
 )
+
 
 (interface Eater
     (m david)

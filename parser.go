@@ -761,6 +761,37 @@ func parseMethod(parens ParenList, annotations []AnnotationForm) (MethodDef, err
 	return methodDef, nil
 }
 
+func parseGetterOrSetter(atom Atom, propertyDef *PropertyDef) (err error) {
+	if parens, ok := atom.(ParenList); ok {
+		if len(parens.Atoms) == 0 {
+			return errors.New("Unexpected empty parens in property: " + spew.Sdump(atom))
+		}
+		if symbol, ok := parens.Atoms[0].(Symbol); ok {
+			switch symbol.Content {
+			case "get":
+				propertyDef.HasGetter = true
+				propertyDef.GetBody, err = parseBody(parens.Atoms[1:])
+				if err != nil {
+					return err
+				}
+			case "set":
+				propertyDef.HasSetter = true
+				propertyDef.SetBody, err = parseBody(parens.Atoms[1:])
+				if err != nil {
+					return err
+				}
+			default:
+				return errors.New("Unexpected symbol at start of parens in property: " + spew.Sdump(symbol))
+			}
+		} else {
+			return errors.New("Expecting symbol at start of parens in property: " + spew.Sdump(atom))
+		}
+	} else {
+		return errors.New("Unexpected atom in property: " + spew.Sdump(atom))
+	}
+	return nil
+}
+
 func parseProperty(parens ParenList, annotations []AnnotationForm) (PropertyDef, error) {
 	atoms := parens.Atoms
 	if len(atoms) < 3 {
@@ -792,22 +823,23 @@ func parseProperty(parens ParenList, annotations []AnnotationForm) (PropertyDef,
 		return PropertyDef{}, errors.New("Expecting type for property: " + spew.Sdump(atoms[idx]))
 	}
 	idx++
-	setFlagIdx := len(atoms)
-	for i, atom := range atoms[idx:] {
-		if parseFlag(atom, "set") {
-			setFlagIdx = i + idx
-			break
-		}
+	if idx >= len(atoms) {
+		return PropertyDef{}, errors.New("Property should have a getter or setter or both: " + spew.Sdump(atoms[idx]))
 	}
-	propertyDef.GetBody, err = parseBody(atoms[idx:setFlagIdx])
+	err = parseGetterOrSetter(atoms[idx], &propertyDef)
 	if err != nil {
 		return PropertyDef{}, err
 	}
-	if setFlagIdx != len(atoms) {
-		propertyDef.SetBody, err = parseBody(atoms[setFlagIdx+1:])
+	idx++
+	if idx < len(atoms) {
+		err = parseGetterOrSetter(atoms[idx], &propertyDef)
 		if err != nil {
 			return PropertyDef{}, err
 		}
+		idx++
+	}
+	if idx < len(atoms) {
+		return PropertyDef{}, errors.New("Property has unexpected atom after getter and setter: " + spew.Sdump(atoms[idx]))
 	}
 	return propertyDef, nil
 }

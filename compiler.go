@@ -321,7 +321,7 @@ func compileExpression(expr Expression, ns *Namespace, expectedType Type,
 			return "", nil, err
 		}
 	case IndexingForm:
-		code, dt, err = compileIndexingForm(expr, ns, locals)
+		code, dt, err = compileIndexingForm(expr, ns, false, locals)
 		if err != nil {
 			return "", nil, err
 		}
@@ -538,7 +538,7 @@ func compileBody(statements []Statement, returnType Type,
 	return code, nil
 }
 
-func compileIndexingForm(f IndexingForm, ns *Namespace,
+func compileIndexingForm(f IndexingForm, ns *Namespace, isTarget bool,
 	locals map[ShortName]Type) (code string, dt Type, err error) {
 
 	last := f.Args[len(f.Args)-1]
@@ -578,7 +578,11 @@ func compileIndexingForm(f IndexingForm, ns *Namespace,
 					err = msg(varExpr.Line, varExpr.Column, "Improper name in indexing form.")
 					return
 				}
-				dt, ok = GetFieldType(varExpr.Name, dt, static)
+				dt, ok, err = GetFieldOrPropertyType(varExpr.Name, dt, isTarget, static)
+				if err != nil {
+					err = msg(varExpr.Line, varExpr.Column, err.Error())
+					return
+				}
 				if !ok {
 					err = msg(varExpr.Line, varExpr.Column, "No field called '"+string(varExpr.Name)+"' in indexing form.")
 					return
@@ -612,7 +616,7 @@ func compileAssignment(f AssignmentForm, ns *Namespace, locals map[ShortName]Typ
 		}
 		code = string(globalInfo.Namespace.CSName) + "." + string(globalInfo.Name)
 	case IndexingForm:
-		code, dt, err = compileIndexingForm(target, ns, locals)
+		code, dt, err = compileIndexingForm(target, ns, true, locals)
 		if err != nil {
 			return "", err
 		}

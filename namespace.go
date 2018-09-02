@@ -245,7 +245,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 			}
 		}
 
-		// (impossible to have method signature name conflicts)
+		// (impossible to have method signature name conflicts between different types)
 		for name, callables := range foreign.Methods {
 			for _, callable := range callables {
 				if callable.Namespace == foreign {
@@ -409,19 +409,15 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 				staticType = classInfo
 			}
 
-			if _, ok := classInfo.Fields[p.Name]; ok {
-				return nil, msg(p.Line, p.Column, "Cannot have field and property of same name in a class.")
-			}
-
-			if _, ok := classInfo.Properties[p.Name]; ok {
-				return nil, msg(p.Line, p.Column, "Cannot have multiple properties of same name in a class.")
-			}
-
 			if !p.IsManual {
 				name := p.Name + "_"
 
 				if _, ok := classInfo.Fields[name]; ok {
 					return nil, msg(p.Line, p.Column, "Field name conflicts with auto-field of property in a struct.")
+				}
+
+				if _, ok := classInfo.Properties[name]; ok {
+					return nil, msg(p.Line, p.Column, "Field name conflicts with name of property in a struct.")
 				}
 
 				classInfo.Fields[name] = FieldInfo{
@@ -432,9 +428,19 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 				}
 			}
 
+			if _, ok := classInfo.Fields[p.Name]; ok {
+				return nil, msg(p.Line, p.Column, "Cannot have field and property of same name in a class.")
+			}
+
+			if _, ok := classInfo.Properties[p.Name]; ok {
+				return nil, msg(p.Line, p.Column, "Cannot have multiple properties of same name in a class.")
+			}
+
 			classInfo.Properties[p.Name] = PropertyInfo{
 				Name:        p.Name,
 				Type:        t,
+				HasGetter:   p.HasGetter,
+				HasSetter:   p.HasSetter,
 				AccessLevel: p.AccessLevel,
 				Static:      staticType,
 			}
@@ -486,6 +492,13 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 		classInfo.Methods = map[ShortName][]*CallableInfo{}
 		methodSigs := map[ShortName][][]Type{}
 		for _, method := range classDef.Methods {
+			if _, ok := classInfo.Fields[method.Name]; ok {
+				return nil, msg(method.Line, method.Column, "Cannot have method with same name as a field in the same class.")
+			}
+			if _, ok := classInfo.Properties[method.Name]; ok {
+				return nil, msg(method.Line, method.Column, "Cannot have method with same name as a property in the same class.")
+			}
+
 			var returnType Type
 			if method.Return.Name != "" {
 				returnType = ns.GetType(method.Return)
@@ -649,19 +662,15 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 				staticType = structInfo
 			}
 
-			if _, ok := structInfo.Fields[p.Name]; ok {
-				return nil, msg(p.Line, p.Column, "Cannot have field and property of same name in a struct.")
-			}
-
-			if _, ok := structInfo.Properties[p.Name]; ok {
-				return nil, msg(p.Line, p.Column, "Cannot have multiple properties of same name in a struct.")
-			}
-
 			if !p.IsManual {
 				name := p.Name + "_"
 
 				if _, ok := structInfo.Fields[name]; ok {
 					return nil, msg(p.Line, p.Column, "Field name conflicts with auto-field of property in a struct.")
+				}
+
+				if _, ok := structInfo.Properties[name]; ok {
+					return nil, msg(p.Line, p.Column, "Field name conflicts with property name in a struct.")
 				}
 
 				structInfo.Fields[name] = FieldInfo{
@@ -672,9 +681,18 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 				}
 			}
 
+			if _, ok := structInfo.Fields[p.Name]; ok {
+				return nil, msg(p.Line, p.Column, "Cannot have field and property of same name in a struct.")
+			}
+			if _, ok := structInfo.Properties[p.Name]; ok {
+				return nil, msg(p.Line, p.Column, "Cannot have multiple properties of same name in a struct.")
+			}
+
 			structInfo.Properties[p.Name] = PropertyInfo{
 				Name:        p.Name,
 				Type:        t,
+				HasGetter:   len(p.GetBody) > 0,
+				HasSetter:   len(p.SetBody) > 0,
 				AccessLevel: p.AccessLevel,
 				Static:      staticType,
 			}
@@ -726,6 +744,13 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 		structInfo.Methods = map[ShortName][]*CallableInfo{}
 		methodSigs := map[ShortName][][]Type{}
 		for _, method := range structDef.Methods {
+			if _, ok := structInfo.Fields[method.Name]; ok {
+				return nil, msg(method.Line, method.Column, "Cannot have method with same name as a field in the same struct.")
+			}
+			if _, ok := structInfo.Properties[method.Name]; ok {
+				return nil, msg(method.Line, method.Column, "Cannot have method with same name as a property in the same struct.")
+			}
+
 			var returnType Type
 			if method.Return.Name != "" {
 				returnType = ns.GetType(method.Return)
@@ -827,14 +852,28 @@ func getParamTypes(typeAtoms []TypeAtom, ns *Namespace) ([]Type, error) {
 
 // returns true if field exists
 // todo: account for access level
-func GetFieldType(field ShortName, t Type, static bool) (Type, bool) {
+func GetFieldOrPropertyType(field ShortName, t Type, isTarget bool, static bool) (Type, bool, error) {
 	switch t := t.(type) {
 	case *ClassInfo:
 		// must search ancestors as well as the class itself
 		for {
 			if fieldInfo, ok := t.Fields[field]; ok {
 				if (static && fieldInfo.Static != nil) || (!static && fieldInfo.Static == nil) {
-					return fieldInfo.Type, true
+					return fieldInfo.Type, true, nil
+				}
+			}
+			if propertyInfo, ok := t.Properties[field]; ok {
+				if (static && propertyInfo.Static != nil) || (!static && propertyInfo.Static == nil) {
+					if isTarget {
+						if !propertyInfo.HasSetter {
+							return nil, false, errors.New("Canont assign to property with no setter.")
+						}
+					} else {
+						if !propertyInfo.HasGetter {
+							return nil, false, errors.New("Cannot retrieve value of property with no getter.")
+						}
+					}
+					return propertyInfo.Type, true, nil
 				}
 			}
 			if t.Parent == nil || static {
@@ -842,29 +881,34 @@ func GetFieldType(field ShortName, t Type, static bool) (Type, bool) {
 			}
 			t = t.Parent
 		}
-		return nil, false
+		return nil, false, nil
 	case *StructInfo:
 		if fieldInfo, ok := t.Fields[field]; ok {
 			if (static && fieldInfo.Static != nil) || (!static && fieldInfo.Static == nil) {
-				return fieldInfo.Type, true
+				return fieldInfo.Type, true, nil
+			}
+			if propertyInfo, ok := t.Properties[field]; ok {
+				if (static && propertyInfo.Static != nil) || (!static && propertyInfo.Static == nil) {
+					return propertyInfo.Type, true, nil
+				}
 			}
 		} else {
-			return nil, false
+			return nil, false, nil
 		}
 	case *InterfaceInfo:
 		// todo (interfaces can have properties)
-		return nil, false
+		return nil, false, nil
 	case ArrayType:
-		return nil, false
+		return nil, false, nil
 	case BuiltinType:
 		if t == StrType {
 			if field == StrLengthWord {
-				return IntType, true
+				return IntType, true, nil
 			}
 		}
 	}
 	panic("shouldn't reach here")
-	return nil, false
+	return nil, false, nil
 }
 
 // return false if other is not an interface

@@ -86,16 +86,12 @@ func lex(code string) ([]Token, error) {
 			column++
 			i++
 		} else if r == ' ' {
-			isIndentation := i > 0 && runes[i-1] == '\n'
 			firstIdx := i
 			for i < len(runes) && runes[i] == ' ' {
 				column++
 				i++
 			}
 			content := string(runes[firstIdx:i])
-			if isIndentation && len(content)%IndentSpaces != 0 {
-				return nil, errors.New("Indentation on line " + itoa(line) + " is not a multiple of " + itoa(IndentSpaces) + " spaces.")
-			}
 			tokens = append(tokens, Token{Spaces, content, line, column})
 		} else if r == '\t' {
 			return nil, errors.New("File improperly contains a tab character: line " + itoa(line) + " and column " + itoa(column))
