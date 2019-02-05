@@ -1,12 +1,27 @@
 
 -  static property    
 
-    allow initial value for property like with field? how distinguish from start of getter? -val flag?
+    allow initial value for property like with field?
 
 - interface properties (and fields?)
 
 - account for member access levels
 
+
+- indexing form should be left-to-right like conventional order: [object field] [array index] 
+
+- special assignment that creates variable in scope only of next line of the same block
+   -- or perhaps goes out of scope after its use on a subsequent line
+    -- (so can occur multiple times on that line, but doesn't exist after)
+
+    ast a 3          // assign temp
+    as x (add a 9)
+    as y a           // error because a doesn't exist here
+
+
+block x y : a b     // x y created and exist beyond the block; a and b are only other outer block variables accessible in the block
+                    // cannot assign to a and b unless marked? a second colon for variables that are read/write? what about indexing ops?
+                    // types of x and y inferred from assignments in the block, but if any ambiguity, type must be denoted
 
 
 - override and virtual

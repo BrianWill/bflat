@@ -1,0 +1,46 @@
+- paren hiding
+
+
+
+-- constraints:
+
+    indent is always multiple of 4 spaces
+
+    starting unmatched open paren should have single-indent and/or double-indent block after it
+
+    starting open paren is closed at end of block
+
+    single-indent block only after line starting open paren
+
+
+    interior open delimiter is followed by double-indent block
+
+    double-indent block only follows line with interior open delimiter
+
+    interior open delimiter is closed at end of double-indent block
+
+    no open delimiter at end of line
+
+
+-- todo what about non-paren delimiters spanning multiple lines?
+
+
+
+
+- hover
+
+- jump to def
+
+- code completion
+
+
+
+- paren formatting, assist
+
+
+
+- compiler should not abort on first error
+
+
+
+
