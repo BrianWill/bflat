@@ -49,7 +49,11 @@ public class Bar {
 }
 
 public interface Eater {
-	public void david(Something.Test.Eater);
+	void david(Something.Test.Eater);
+	string evan {
+		get;
+		set;
+	}
 }
 
 }

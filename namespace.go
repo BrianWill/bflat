@@ -308,7 +308,7 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 		}
 	}
 
-	// set up interface methods
+	// set up interface methods and properties
 	for _, interfaceDef := range topDefs.Interfaces {
 		interfaceInfo := ns.GetInterface(interfaceDef.Type.Name, interfaceDef.Type.Namespace)
 
@@ -347,6 +347,26 @@ func createNamespace(topDefs *TopDefs, namespace NSNameFull, nsFileLookup map[NS
 
 			ns.Methods[methodName] = append(ns.Methods[methodName], callable)
 			interfaceInfo.Methods[methodName] = append(interfaceInfo.Methods[methodName], callable)
+		}
+
+		interfaceInfo.Properties = map[ShortName]PropertyInfo{}
+		for _, prop := range interfaceDef.Properties {
+
+			t := ns.GetType(prop.Type)
+			if t == nil {
+				return nil, msg(prop.Line, prop.Column, "Interface property has unknown type.")
+			}
+
+			if _, ok := interfaceInfo.Properties[prop.Name]; ok {
+				return nil, msg(prop.Line, prop.Column, "Interface property has multiple properties of the same name.")
+			}
+
+			interfaceInfo.Properties[prop.Name] = PropertyInfo{
+				Name:      prop.Name,
+				Type:      t,
+				HasGetter: prop.HasGetter,
+				HasSetter: prop.HasSetter,
+			}
 		}
 	}
 

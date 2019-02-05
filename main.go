@@ -223,11 +223,12 @@ type StructInfo struct {
 }
 
 type InterfaceInfo struct {
-	Name      ShortName
-	Namespace *Namespace
-	Parents   []*InterfaceInfo
-	Methods   map[ShortName][]*CallableInfo // an interface can have overloads of the same method name
-	Params    []Type
+	Name       ShortName
+	Namespace  *Namespace
+	Parents    []*InterfaceInfo
+	Methods    map[ShortName][]*CallableInfo // an interface can have overloads of the same method name
+	Properties map[ShortName]PropertyInfo
+	Params     []Type
 }
 
 type GlobalInfo struct {
@@ -564,6 +565,7 @@ type InterfaceDef struct {
 	MethodParams      [][]TypeAtom
 	MethodReturnTypes []TypeAtom
 	MethodAnnotations [][]AnnotationForm
+	Properties        []PropertyDef
 	Annotations       []AnnotationForm
 }
 

@@ -5,6 +5,10 @@
 
 - interface properties (and fields?)
 
+    check class actually has to implement the properties
+
+    - what about name collision between method and property of same interface? allowed or not?
+
 - account for member access levels
 
 
@@ -30,7 +34,11 @@ block x y : a b     // x y created and exist beyond the block; a and b are only 
 
 - import shortname aliases
 
-- generics
+- generic methods
+
+- generic classes
+
+- extension methods
 
 - indexer methods
 
