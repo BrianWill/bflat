@@ -1016,9 +1016,9 @@ func compileInterface(def InterfaceDef, ns *Namespace, indent string) (string, e
 	for name, methods := range interfaceInfo.Methods {
 		for _, method := range methods {
 			if method.Return == nil {
-				code += "\tpublic void " + string(name) + "("
+				code += "\tvoid " + string(name) + "("
 			} else {
-				code += "\tpublic " + compileType(method.Return) + " " + string(name) + "("
+				code += "\t" + compileType(method.Return) + " " + string(name) + "("
 			}
 			for i, paramType := range method.ParamTypes {
 				code += compileType(paramType)
@@ -1029,6 +1029,17 @@ func compileInterface(def InterfaceDef, ns *Namespace, indent string) (string, e
 			code += ");\n"
 		}
 	}
+	for name, prop := range interfaceInfo.Properties {
+		code += "\t" + compileType(prop.Type) + " " + string(name) + " {\n"
+		if prop.HasGetter {
+			code += "\t\t" + "get;\n"
+		}
+		if prop.HasSetter {
+			code += "\t\t" + "set;\n"
+		}
+		code += "\t}\n"
+	}
+
 	code += "}\n\n"
 	return code, nil
 }

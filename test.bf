@@ -5,11 +5,10 @@ something.test
     (as b (Bar))
 
     (var x A<I>)
-    (as x (A<I> -size 6))
+    (as x (A<I> -size 6)))
 
 
     //(lisa Bar)
-)
 
 (global foo Str `234`)
 
@@ -19,26 +18,23 @@ something.test
         (as [zelda] 6.0)
         (lisa me)
         (var b (Bar))
-        (as [evan me] s)
-        (as s [evan me])
-    )
+        (as [evan] s)
+        (as s [evan]))
 
     (p evan Str
-        (get 
+        (get)
             //(return [evan_])
-        )
-        (set
+        
+        (set)))
             //(as [evan_] value)
-        )
-    )
 
-)
 
 
 (interface Eater
     (m david)
+
+    (p evan Str))
     //(m david : I) // should be error because indistinguishable from previous overload
-)
 
 
 
@@ -48,17 +44,13 @@ something.test
 
     (m lisa
         (var i B 3)
-        (as i 5)
-    )
+        (as i 5))
 
     (constructor 
         (var i 3)
-        (as i 5)
+        (as i 5))
         //(lisa me)
-    )
 
     (constructor : a Str
         (var i Str)
-        (as i `jsidfj`)
-    )
-)
+        (as i `jsidfj`)))

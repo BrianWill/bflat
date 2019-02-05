@@ -1469,16 +1469,60 @@ func parseInterface(parens ParenList, annotations []AnnotationForm) (InterfaceDe
 				interfaceDef.MethodNames = append(interfaceDef.MethodNames, ShortName(name))
 				interfaceDef.MethodParams = append(interfaceDef.MethodParams, paramTypes)
 				interfaceDef.MethodReturnTypes = append(interfaceDef.MethodReturnTypes, returnType)
-			case "f":
-				// todo: fields
 			case "p":
-				// todo: properties
+				propertyDef, err := parseInterfaceProperty(parens)
+				if err != nil {
+					return InterfaceDef{}, err
+				}
+				interfaceDef.Properties = append(interfaceDef.Properties, propertyDef)
+			default:
+				return InterfaceDef{}, errors.New("Invalid atom in interface. " + spew.Sdump(parens))
 			}
 		} else {
 			return InterfaceDef{}, errors.New("Expecting symbol at start of parenlist in interface. " + spew.Sdump(parens))
 		}
 	}
 	return interfaceDef, nil
+}
+
+func parseInterfaceProperty(parens ParenList) (p PropertyDef, err error) {
+	idx := 1
+	atoms := parens.Atoms
+	if idx >= len(atoms) {
+		err = msg(parens.Line, parens.Column, "Interface property form is missing name and type.")
+		return
+	}
+	if parseFlag(atoms[idx], "getOnly") {
+		p.HasGetter = true
+		idx++
+	} else if parseFlag(atoms[idx], "setOnly") {
+		p.HasSetter = true
+		idx++
+	} else {
+		p.HasGetter = true
+		p.HasSetter = true
+	}
+	if idx >= len(atoms) {
+		err = msg(parens.Line, parens.Column, "Interface property form is missing name and type.")
+		return
+	}
+	if symbol, ok := atoms[idx].(Symbol); ok {
+		if symbol.Content == strings.Title(symbol.Content) {
+			err = msg(parens.Line, parens.Column, "Interface name must start with lowercase letter.")
+			return
+		}
+		p.Name = ShortName(symbol.Content)
+	} else {
+		err = msg(parens.Line, parens.Column, "Interface property form expecting symbol for name.")
+		return
+	}
+	idx++
+	if idx >= len(atoms) {
+		err = msg(parens.Line, parens.Column, "Interface property form is missing type.")
+		return
+	}
+	p.Type, err = parseTypeAtom(atoms[idx])
+	return
 }
 
 func parseMethodSignature(parens ParenList) (paramTypes []TypeAtom, returnType TypeAtom, name string, err error) {
