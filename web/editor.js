@@ -106,8 +106,30 @@ function insertText(text) {
     cursorPreferredPos = cursorPos;
 }
 
+function deleteCurrentLine() {
+    if (textBuffer.length === 1) {
+        textBuffer = [''];
+        cursorPos = 0;
+        cursorPreferredPos = 0;
+        cursorLine = 0;
+    } else {
+        textBuffer.splice(cursorLine, 1);
+        if (cursorLine > textBuffer.length - 1) {
+            cursorLine = textBuffer.length - 1;
+        }
+        let newLineLength = textBuffer[cursorLine].length;
+        if (cursorPreferredPos <= newLineLength) {
+            cursorPos = cursorPreferredPos;
+        } else {
+            cursorPos = newLineLength;
+            cursorPreferredPos = newLineLength;
+        }
+    }
+}
+
 document.body.addEventListener('keydown', function (evt) {
     let redraw = false;
+    console.log(evt);
     evt.stopPropagation();
     if (evt.key.length === 1) {
         let code = evt.key.charCodeAt(0);
@@ -122,11 +144,22 @@ document.body.addEventListener('keydown', function (evt) {
                     case "=":
                     case "0":
                         return;
+                    case "o":
+                    case "O":
+                        evt.preventDefault();
+                        return
+                    case "k":
+                    case "K":
+                        deleteCurrentLine();
+                        showCursor();
+                        redraw = true;
+                        break;
                 }
+            } else {
+                insertText(evt.key);
+                showCursor();
+                redraw = true;
             }
-            insertText(evt.key);
-            showCursor();
-            redraw = true;
         }
     } else {
         switch (evt.key) {
@@ -261,7 +294,6 @@ editor.addEventListener('mousedown', function (evt) {
     if (newPos > textBuffer[newLine].length) {
         newPos = textBuffer[newLine].length;
     }
-    console.log('new cursor line & new pos', newLine, newPos);
     cursorPos = newPos;
     cursorPreferredPos = newPos;
     cursorLine = newLine;
@@ -270,14 +302,12 @@ editor.addEventListener('mousedown', function (evt) {
 }, false);
 
 editor.addEventListener('focus', function (evt) {
-    console.log('editor gained focus');
     editorHasFocus = true;
     showCursor();
     draw(ctx);
 });
 
 editor.addEventListener('blur', function (evt) {
-    console.log('editor lost focus');
     editorHasFocus = false;
     showCursor();
     draw(ctx);
