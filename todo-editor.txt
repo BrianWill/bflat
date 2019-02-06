@@ -1,0 +1,41 @@
+
+
+multi-line editing
+
+
+
+option-arrow (skips over immediately adjacent spaces/tabs, putting cursor right before next space/tab over)
+
+
+copy-paste
+
+offscreen canvas buffers for smooth scrolling (use at least 3, and copy from these buffers to onscreen canvas)
+
+shift selection
+
+mouse click for place cursor
+
+mouse selection
+
+
+efficient text buffer using TextArea? (presumably it could avoid producing so much garbage as user types)
+    native byte array? 
+
+    function bin2String(array) {
+        return String.fromCharCode.apply(String, array);
+    }
+
+    use views w/ buffers?
+
+
+don't preventDefault for some browser hotkeys (reload?, new tab? ctrl-s should not print a character)
+
+
+vertical scroll
+horizontal scroll
+
+
+when moving cursor, changing selection, only redraw lines that need to be redrawn instead of whole canvas
+
+
+support for variable-width fonts
