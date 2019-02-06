@@ -7,6 +7,9 @@ look at carota
 multi-line editing
 
 
+bundle cursor pos and selection info into a global object
+
+
 
 option-arrow (skips over immediately adjacent spaces/tabs, putting cursor right before next space/tab over)
 
@@ -56,3 +59,7 @@ support tab size other than 4 spaces
 
 
 when moving cursor, changing selection, only redraw lines that need to be redrawn instead of whole canvas
+
+
+
+LOL: https://www.w3.org/TR/2dcontext/#best-practices

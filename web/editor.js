@@ -36,7 +36,7 @@ function sizeCanvas() {
 }
 
 const defaultTextColor = '#ddd';
-const defaultFont = "14pt Menlo, Monaco, 'Courier New', monospace";
+const defaultFont = "13pt Menlo, Monaco, 'Courier New', monospace";
 
 function drawText(ctx) {
     ctx.fillStyle = '#422';
@@ -44,13 +44,19 @@ function drawText(ctx) {
     ctx.fillStyle = defaultTextColor;
     ctx.font = defaultFont;
     ctx.textBaseline = 'top';
-    ctx.fillText(textBuffer, 10, 10);
+    let y = firstLineOffsetY;
+    for (var line of textBuffer) {
+        ctx.fillText(line, lineOffsetX, y);
+        y += lineHeight;
+    }
 }
+
+var editorHasFocus = false;
 
 const firstLineOffsetY = 10;
 const lineOffsetX = 10;
 
-const lineHeight = 40;
+const lineHeight = 26;  // todo: set proportional to font
 const cursorWidth = 2;
 const cursorHeight = 23;
 const cursorOffsetY = -4;
@@ -58,17 +64,23 @@ var cursorShown = true;
 
 ctx.font = defaultFont;
 const characterWidth = ctx.measureText('12345').width / 5;  // more than 1 character so to get average (not sure if result would be different)
-console.log(characterWidth);
-
 
 function drawCursor(ctx) {
+    if (!editorHasFocus) {
+        return;
+    }
     const cursorColor = 'rgba(255, 255, 0, 0.8)';
     ctx.fillStyle = cursorColor;
-    ctx.fillRect(lineOffsetX + characterWidth * cursorPos, firstLineOffsetY + cursorOffsetY, cursorWidth, cursorHeight);
+    ctx.fillRect(lineOffsetX + characterWidth * cursorPos, 
+        firstLineOffsetY + cursorOffsetY + lineHeight * cursorLine,
+        cursorWidth, 
+        cursorHeight
+    );
 }
 
-var textBuffer = "Hello, there. width: " + width + " height: " + height + " something something something something";
+var textBuffer = ["Hello, there.", "Why hello there.", "      General Kenobi."];
 var cursorPos = 0;    // position within line, 0 is before first character, line.length is just after last character
+var cursorPreferredPos = 0;    // when moving cursor up and down, prefer this for new cursorPos
 var cursorLine = 0;
 
 var timeoutHandle;
@@ -86,8 +98,15 @@ const space2 = '  ';
 const space3 = '   ';
 const space4 = '    ';
 
+// assumes no newlines
+function insertText(text) {
+    let line = textBuffer[cursorLine];
+    textBuffer[cursorLine] = line.splice(cursorPos, 0, text);
+    cursorPos += text.length;
+    cursorPreferredPos = cursorPos;
+}
+
 document.body.addEventListener('keydown', function (evt) {
-    console.log(evt);
     let redraw = false;
     evt.stopPropagation();
     if (evt.key.length === 1) {
@@ -105,8 +124,7 @@ document.body.addEventListener('keydown', function (evt) {
                         return;
                 }
             }
-            textBuffer = textBuffer.splice(cursorPos, 0, evt.key);
-            cursorPos++;
+            insertText(evt.key);
             showCursor();
             redraw = true;
         }
@@ -114,14 +132,42 @@ document.body.addEventListener('keydown', function (evt) {
         switch (evt.key) {
             case "ArrowLeft":
                 if (cursorPos > 0) {
-                    cursorPos--
+                    cursorPos--;
+                    cursorPreferredPos = cursorPos;
                     showCursor();
                     redraw = true;
                 }
                 break;
             case "ArrowRight":
-                if (cursorPos < textBuffer.length) {
-                    cursorPos++
+                if (cursorPos < textBuffer[cursorLine].length) {
+                    cursorPos++;
+                    cursorPreferredPos = cursorPos;
+                    showCursor();
+                    redraw = true;
+                }
+                break;
+            case "ArrowUp":
+                if (cursorLine > 0) {
+                    cursorLine--;
+                    let newLineLength = textBuffer[cursorLine].length;
+                    if (cursorPreferredPos <= newLineLength) {
+                        cursorPos = cursorPreferredPos;
+                    } else {
+                        cursorPos = newLineLength;
+                    }
+                    showCursor();
+                    redraw = true;
+                }
+                break;
+            case "ArrowDown":
+                if (cursorLine < textBuffer.length - 1) {
+                    cursorLine++;
+                    let newLineLength = textBuffer[cursorLine].length;
+                    if (cursorPreferredPos <= newLineLength) {
+                        cursorPos = cursorPreferredPos;
+                    } else {
+                        cursorPos = newLineLength;
+                    }
                     showCursor();
                     redraw = true;
                 }
@@ -129,19 +175,45 @@ document.body.addEventListener('keydown', function (evt) {
             case "Backspace":
                 if (cursorPos > 0 ) {
                     cursorPos--;
-                    textBuffer = textBuffer.slice(0, cursorPos) + textBuffer.slice(cursorPos + 1);
+                    cursorPreferredPos = cursorPos;
+                    let line = textBuffer[cursorLine];
+                    textBuffer[cursorLine] = line.slice(0, cursorPos) + line.slice(cursorPos + 1);
+                    showCursor();
+                    redraw = true;
+                } else if (cursorLine > 0) {
+                    var prevLineIdx = cursorLine - 1;
+                    var prevLine = textBuffer[prevLineIdx];
+                    textBuffer[prevLineIdx] = prevLine + textBuffer[cursorLine];
+                    textBuffer.splice(cursorLine, 1);
+                    cursorPos = prevLine.length;
+                    cursorLine = prevLineIdx;
                     showCursor();
                     redraw = true;
                 }
                 break;
             case "Delete":
-                if (cursorPos < textBuffer.length) {
-                    textBuffer = textBuffer.slice(0, cursorPos) + textBuffer.slice(cursorPos + 1);
+                if (cursorPos < textBuffer[cursorLine].length) {
+                    let line = textBuffer[cursorLine];
+                    textBuffer[cursorLine] = line.slice(0, cursorPos) + line.slice(cursorPos + 1);
+                    cursorPreferredPos = cursorPos;
+                    showCursor();
+                    redraw = true;
+                } else if (cursorLine < textBuffer.length - 1) {
+                    textBuffer[cursorLine] = textBuffer[cursorLine] + textBuffer[cursorLine + 1];
+                    textBuffer.splice(cursorLine + 1, 1);
                     showCursor();
                     redraw = true;
                 }
                 break;
             case "Enter":
+                let line = textBuffer[cursorLine];
+                textBuffer[cursorLine] = line.slice(0, cursorPos);
+                cursorLine++;
+                textBuffer.splice(cursorLine, 0, line.slice(cursorPos));
+                cursorPos = 0;
+                cursorPreferredPos = cursorPos;
+                showCursor();
+                redraw = true;
                 break;
             case "Tab":
                 evt.preventDefault();
@@ -161,8 +233,7 @@ document.body.addEventListener('keydown', function (evt) {
                         insert = space4;
                         break;
                 }
-                textBuffer = textBuffer.splice(cursorPos, 0, insert);
-                cursorPos += numSpaces;
+                insertText(insert);
                 showCursor();
                 redraw = true;
                 break;
@@ -175,11 +246,42 @@ document.body.addEventListener('keydown', function (evt) {
 
 editor.addEventListener('mousedown', function (evt) {
     // todo: using clientX/Y for now; should get relative from canvas (to allow a canvas editor that isn't full page)
-    console.log(evt);
-    cursorPos = Math.floor((evt.clientX - lineOffsetX) / characterWidth);
+    const cursorOffsetY = 7;   // want text cursor to select as if from center of the cursor, not top (there's no way to get the cursor's actual height, so we guess its half height)
+    let newPos = Math.round((evt.clientX - lineOffsetX) / characterWidth);
+    let newLine = Math.floor((evt.clientY - firstLineOffsetY + cursorOffsetY) / lineHeight);
+    if (newPos < 0) {
+        newPos = 0;
+    }
+    if (newLine < 0) {
+        newLine = 0;
+    }
+    if (newLine > textBuffer.length - 1) {
+        newLine = textBuffer.length - 1;
+    }
+    if (newPos > textBuffer[newLine].length) {
+        newPos = textBuffer[newLine].length;
+    }
+    console.log('new cursor line & new pos', newLine, newPos);
+    cursorPos = newPos;
+    cursorPreferredPos = newPos;
+    cursorLine = newLine;
     showCursor();
     draw(ctx);
 }, false);
+
+editor.addEventListener('focus', function (evt) {
+    console.log('editor gained focus');
+    editorHasFocus = true;
+    showCursor();
+    draw(ctx);
+});
+
+editor.addEventListener('blur', function (evt) {
+    console.log('editor lost focus');
+    editorHasFocus = false;
+    showCursor();
+    draw(ctx);
+});
 
 const cursorBlinkTime = 620;
 var cursorBlinkTimeoutHandle;
@@ -209,3 +311,5 @@ function draw(ctx) {
 sizeCanvas();
 showCursor();
 draw(ctx);
+
+editor.focus();
