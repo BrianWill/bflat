@@ -80,8 +80,14 @@ window.addEventListener("resize", function (evt) {
     }, 150);
 }, false);
 
+const numSpacesForTab = 4;
+const space1 = ' ';
+const space2 = '  ';
+const space3 = '   ';
+const space4 = '    ';
 
 document.body.addEventListener('keydown', function (evt) {
+    console.log(evt);
     let redraw = false;
     evt.stopPropagation();
     if (evt.key.length === 1) {
@@ -136,6 +142,29 @@ document.body.addEventListener('keydown', function (evt) {
                 }
                 break;
             case "Enter":
+                break;
+            case "Tab":
+                evt.preventDefault();
+                let numSpaces = numSpacesForTab - (cursorPos % numSpacesForTab);
+                let insert;
+                switch (numSpaces) {
+                    case 1:
+                        insert = space1;
+                        break;
+                    case 2:
+                        insert = space2;
+                        break;
+                    case 3:
+                        insert = space3;
+                        break;
+                    case 4:
+                        insert = space4;
+                        break;
+                }
+                textBuffer = textBuffer.splice(cursorPos, 0, insert);
+                cursorPos += numSpaces;
+                showCursor();
+                redraw = true;
                 break;
         }
     }

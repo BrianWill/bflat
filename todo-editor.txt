@@ -1,4 +1,8 @@
 
+look at carota
+
+    uses div container for scroll bar; as scrolling, set style.top on position absolute canvas within, and 
+    redraw canavs to account for new scroll position
 
 multi-line editing
 
@@ -6,6 +10,11 @@ multi-line editing
 
 option-arrow (skips over immediately adjacent spaces/tabs, putting cursor right before next space/tab over)
 
+
+line numbering
+
+
+vertical scroll
 
 copy-paste
 
@@ -17,6 +26,11 @@ mouse click for place cursor
 
 mouse selection
 
+search and replace
+
+undo/redo
+
+multi-tabs
 
 efficient text buffer using TextArea? (presumably it could avoid producing so much garbage as user types)
     native byte array? 
@@ -31,11 +45,14 @@ efficient text buffer using TextArea? (presumably it could avoid producing so mu
 don't preventDefault for some browser hotkeys (reload?, new tab? ctrl-s should not print a character)
 
 
-vertical scroll
+
 horizontal scroll
+
+word wrapping
+
+option to insert actual tab characters instead of spaces
+
+support tab size other than 4 spaces
 
 
 when moving cursor, changing selection, only redraw lines that need to be redrawn instead of whole canvas
-
-
-support for variable-width fonts
