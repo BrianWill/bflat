@@ -4,6 +4,43 @@ var ctx = editor.getContext('2d');
 var width = document.body.clientWidth;
 var height = document.body.clientHeight;
 
+var editorHasFocus = false;
+
+const firstLineOffsetY = 10;
+const lineOffsetX = 90;
+const numbersOffsetX = 30;
+
+const lineHeight = 26;  // todo: set proportional to font
+const cursorWidth = 2;
+const cursorHeight = 23;
+const cursorOffsetY = -4;
+var cursorShown = true;
+const cursorBlinkTime = 620;
+
+var textBuffer = ["Hello, there.", "Why hello there.", "      General Kenobi."];
+var cursorPos = 0;    // position within line, 0 is before first character, line.length is just after last character
+var cursorPreferredPos = 0;    // when moving cursor up and down, prefer this for new cursorPos
+var cursorLine = 0;
+
+
+const numSpacesForTab = 4;
+const space1 = ' ';
+const space2 = '  ';
+const space3 = '   ';
+const space4 = '    ';
+
+
+const defaultTextColor = '#ddd';
+const lineNumberColor = '#999';
+const backgroundColor = '#422';
+const defaultFont = "13pt Menlo, Monaco, 'Courier New', monospace";
+
+
+
+ctx.font = defaultFont;
+const characterWidth = ctx.measureText('12345').width / 5;  // more than 1 character so to get average (not sure if result would be different)
+
+
 if (!String.prototype.splice) {
     /**
      * {JSDoc}
@@ -35,13 +72,13 @@ function sizeCanvas() {
     ctx.scale(ratio, ratio);
 }
 
-const defaultTextColor = '#ddd';
-const lineNumberColor = '#999';
-const defaultFont = "13pt Menlo, Monaco, 'Courier New', monospace";
 
 function drawText(ctx) {
-    ctx.fillStyle = '#422';
+    // clear screen
+    ctx.fillStyle = backgroundColor;
     ctx.fillRect(0, 0, width, height);
+
+    // draw lines
     ctx.fillStyle = defaultTextColor;
     ctx.font = defaultFont;
     ctx.textBaseline = 'top';
@@ -63,20 +100,6 @@ function drawText(ctx) {
     }
 }
 
-var editorHasFocus = false;
-
-const firstLineOffsetY = 10;
-const lineOffsetX = 90;
-const numbersOffsetX = 30;
-
-const lineHeight = 26;  // todo: set proportional to font
-const cursorWidth = 2;
-const cursorHeight = 23;
-const cursorOffsetY = -4;
-var cursorShown = true;
-
-ctx.font = defaultFont;
-const characterWidth = ctx.measureText('12345').width / 5;  // more than 1 character so to get average (not sure if result would be different)
 
 function drawCursor(ctx) {
     if (!editorHasFocus) {
@@ -91,10 +114,7 @@ function drawCursor(ctx) {
     );
 }
 
-var textBuffer = ["Hello, there.", "Why hello there.", "      General Kenobi."];
-var cursorPos = 0;    // position within line, 0 is before first character, line.length is just after last character
-var cursorPreferredPos = 0;    // when moving cursor up and down, prefer this for new cursorPos
-var cursorLine = 0;
+
 
 var timeoutHandle;
 window.addEventListener("resize", function (evt) {
@@ -105,11 +125,7 @@ window.addEventListener("resize", function (evt) {
     }, 150);
 }, false);
 
-const numSpacesForTab = 4;
-const space1 = ' ';
-const space2 = '  ';
-const space3 = '   ';
-const space4 = '    ';
+
 
 // assumes no newlines
 function insertText(text) {
@@ -140,8 +156,54 @@ function deleteCurrentLine() {
     }
 }
 
+function prevWhitespaceSkip(cursorPos, cursorLine, textBuffer) {
+    let line = textBuffer[cursorLine];
+    if (cursorPos === 0) {
+        if (cursorLine === 0) {
+            return null;
+        }
+        cursorLine--;
+        line = textBuffer[cursorLine];
+        cursorPos = line.length;
+        if (cursorPos === 0) {
+            return [cursorPos, cursorLine];
+        }
+    }
+    let preceding = line.slice(0, cursorPos);
+    let trimmed = preceding.trimEnd();
+    let firstSpace = trimmed.lastIndexOf(' ');
+    if (firstSpace === -1) {
+        return [0, cursorLine];
+    } else {
+        return [firstSpace + 1,  cursorLine];
+    }
+}
+
+// return [newPos, newLine], or null if cursor already at end
+function nextWhitespaceSkip(cursorPos, cursorLine, textBuffer) {
+    let line = textBuffer[cursorLine];
+    if (cursorPos === line.length) {
+        if (cursorLine === textBuffer.length - 1) {
+            return null;
+        }
+        cursorLine++;
+        cursorPos = 0;
+        line = textBuffer[cursorLine];
+        if (cursorPos === line.length) {
+            return [cursorPos, cursorLine];
+        }
+    }
+    let remaining = line.slice(cursorPos);
+    let trimmed = remaining.trimStart();
+    let firstSpace = trimmed.indexOf(' ');
+    if (firstSpace === -1) {
+        return [line.length, cursorLine];
+    } else {
+        return [cursorPos + (remaining.length - trimmed.length) + firstSpace,  cursorLine];
+    }
+}
+
 document.body.addEventListener('keydown', function (evt) {
-    let redraw = false;
     console.log(evt);
     evt.stopPropagation();
     if (evt.key.length === 1) {
@@ -164,32 +226,72 @@ document.body.addEventListener('keydown', function (evt) {
                     case "k":
                     case "K":
                         deleteCurrentLine();
-                        showCursor();
-                        redraw = true;
                         break;
                 }
             } else {
                 insertText(evt.key);
-                showCursor();
-                redraw = true;
             }
+        } else {
+            return;
         }
     } else {
         switch (evt.key) {
+            // generally immitates VSCode behavior
             case "ArrowLeft":
-                if (cursorPos > 0) {
-                    cursorPos--;
+                if (evt.metaKey) {
+                    let line = textBuffer[cursorLine];
+                    let trimmed = line.trimStart();
+                    let newPos = line.length - trimmed.length; 
+                    if (newPos === cursorPos) {
+                        cursorPos = 0;
+                    } else {
+                        cursorPos = newPos;
+                    }
                     cursorPreferredPos = cursorPos;
-                    showCursor();
-                    redraw = true;
+                } else if (evt.altKey) {
+                    let result = prevWhitespaceSkip(cursorPos, cursorLine, textBuffer);
+                    if (result) {
+                        cursorPos = result[0];
+                        cursorLine = result[1];
+                        cursorPreferredPos = cursorPos;
+                    }
+                } else {
+                    if (cursorPos === 0) {
+                        if (cursorLine === 0) {
+                            return;
+                        }
+                        cursorLine--;
+                        cursorPos = textBuffer[cursorLine].length;
+                        cursorPreferredPos = cursorPos;
+                    } else {
+                        cursorPos--;
+                        cursorPreferredPos = cursorPos;
+                    }
                 }
                 break;
             case "ArrowRight":
-                if (cursorPos < textBuffer[cursorLine].length) {
-                    cursorPos++;
+                if (evt.metaKey) {
+                    cursorPos = textBuffer[cursorLine].length;
                     cursorPreferredPos = cursorPos;
-                    showCursor();
-                    redraw = true;
+                } else if (evt.altKey) {
+                    let result = nextWhitespaceSkip(cursorPos, cursorLine, textBuffer);
+                    if (result) {
+                        cursorPos = result[0];
+                        cursorLine = result[1];
+                        cursorPreferredPos = cursorPos;
+                    }
+                } else {
+                    if (cursorPos === textBuffer[cursorLine].length) {
+                        if (cursorLine === textBuffer.length - 1) {
+                            return;
+                        }
+                        cursorLine++;
+                        cursorPos = 0;
+                        cursorPreferredPos = 0;
+                    } else {
+                        cursorPos++;
+                        cursorPreferredPos = cursorPos;
+                    }
                 }
                 break;
             case "ArrowUp":
@@ -201,8 +303,6 @@ document.body.addEventListener('keydown', function (evt) {
                     } else {
                         cursorPos = newLineLength;
                     }
-                    showCursor();
-                    redraw = true;
                 }
                 break;
             case "ArrowDown":
@@ -214,8 +314,6 @@ document.body.addEventListener('keydown', function (evt) {
                     } else {
                         cursorPos = newLineLength;
                     }
-                    showCursor();
-                    redraw = true;
                 }
                 break;
             case "Backspace":
@@ -224,8 +322,6 @@ document.body.addEventListener('keydown', function (evt) {
                     cursorPreferredPos = cursorPos;
                     let line = textBuffer[cursorLine];
                     textBuffer[cursorLine] = line.slice(0, cursorPos) + line.slice(cursorPos + 1);
-                    showCursor();
-                    redraw = true;
                 } else if (cursorLine > 0) {
                     var prevLineIdx = cursorLine - 1;
                     var prevLine = textBuffer[prevLineIdx];
@@ -233,8 +329,6 @@ document.body.addEventListener('keydown', function (evt) {
                     textBuffer.splice(cursorLine, 1);
                     cursorPos = prevLine.length;
                     cursorLine = prevLineIdx;
-                    showCursor();
-                    redraw = true;
                 }
                 break;
             case "Delete":
@@ -242,13 +336,9 @@ document.body.addEventListener('keydown', function (evt) {
                     let line = textBuffer[cursorLine];
                     textBuffer[cursorLine] = line.slice(0, cursorPos) + line.slice(cursorPos + 1);
                     cursorPreferredPos = cursorPos;
-                    showCursor();
-                    redraw = true;
                 } else if (cursorLine < textBuffer.length - 1) {
                     textBuffer[cursorLine] = textBuffer[cursorLine] + textBuffer[cursorLine + 1];
                     textBuffer.splice(cursorLine + 1, 1);
-                    showCursor();
-                    redraw = true;
                 }
                 break;
             case "Enter":
@@ -258,8 +348,6 @@ document.body.addEventListener('keydown', function (evt) {
                 textBuffer.splice(cursorLine, 0, line.slice(cursorPos));
                 cursorPos = 0;
                 cursorPreferredPos = cursorPos;
-                showCursor();
-                redraw = true;
                 break;
             case "Tab":
                 evt.preventDefault();
@@ -280,14 +368,13 @@ document.body.addEventListener('keydown', function (evt) {
                         break;
                 }
                 insertText(insert);
-                showCursor();
-                redraw = true;
                 break;
+            default:
+                return;
         }
     }
-    if (redraw) {
-        draw(ctx);
-    }
+    showCursor();
+    draw(ctx);
 }, false);
 
 editor.addEventListener('mousedown', function (evt) {
@@ -326,7 +413,7 @@ editor.addEventListener('blur', function (evt) {
     draw(ctx);
 });
 
-const cursorBlinkTime = 620;
+
 var cursorBlinkTimeoutHandle;
 function toggleCursor() {
     if (cursorShown) {
@@ -354,5 +441,4 @@ function draw(ctx) {
 sizeCanvas();
 showCursor();
 draw(ctx);
-
 editor.focus();

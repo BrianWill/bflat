@@ -7,29 +7,29 @@ look at carota
 
 paste
 
-copy, cut
+option-arrow (skips over immediately adjacent spaces/tabs, putting cursor right before next space/tab over)
 
 
-line numbering
-
+prev/nextWhitespaceSkip should not skip past ( ) { } [ ]  ? desired behavior depends upon language mode
 vertical scroll
 
 
 bundle cursor pos and selection info into a global object
 
 
-option-arrow (skips over immediately adjacent spaces/tabs, putting cursor right before next space/tab over)
 
 
 
 
+shift selection
 
+copy, cut
 
 
 
 offscreen canvas buffers for smooth scrolling (use at least 3, and copy from these buffers to onscreen canvas)
 
-shift selection
+
 
 mouse click for place cursor
 
