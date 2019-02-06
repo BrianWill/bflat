@@ -36,6 +36,7 @@ function sizeCanvas() {
 }
 
 const defaultTextColor = '#ddd';
+const lineNumberColor = '#999';
 const defaultFont = "13pt Menlo, Monaco, 'Courier New', monospace";
 
 function drawText(ctx) {
@@ -44,9 +45,20 @@ function drawText(ctx) {
     ctx.fillStyle = defaultTextColor;
     ctx.font = defaultFont;
     ctx.textBaseline = 'top';
+    ctx.textAlign = 'start';
     let y = firstLineOffsetY;
-    for (var line of textBuffer) {
+    for (let i = 0; i < textBuffer.length; i++) {
+        let line = textBuffer[i];
         ctx.fillText(line, lineOffsetX, y);
+        y += lineHeight;
+    }
+
+    // draw line numbers
+    ctx.textAlign = 'right';
+    ctx.fillStyle = lineNumberColor;
+    y = firstLineOffsetY;
+    for (let i = 0; i < textBuffer.length; i++) {
+        ctx.fillText(i + 1, lineOffsetX - numbersOffsetX, y);
         y += lineHeight;
     }
 }
@@ -54,7 +66,8 @@ function drawText(ctx) {
 var editorHasFocus = false;
 
 const firstLineOffsetY = 10;
-const lineOffsetX = 10;
+const lineOffsetX = 90;
+const numbersOffsetX = 30;
 
 const lineHeight = 26;  // todo: set proportional to font
 const cursorWidth = 2;

@@ -4,22 +4,28 @@ look at carota
     uses div container for scroll bar; as scrolling, set style.top on position absolute canvas within, and 
     redraw canavs to account for new scroll position
 
-multi-line editing
 
+paste
 
-bundle cursor pos and selection info into a global object
-
-delete line with Meta-Shift-k
-
-option-arrow (skips over immediately adjacent spaces/tabs, putting cursor right before next space/tab over)
+copy, cut
 
 
 line numbering
 
-
 vertical scroll
 
-copy-paste
+
+bundle cursor pos and selection info into a global object
+
+
+option-arrow (skips over immediately adjacent spaces/tabs, putting cursor right before next space/tab over)
+
+
+
+
+
+
+
 
 offscreen canvas buffers for smooth scrolling (use at least 3, and copy from these buffers to onscreen canvas)
 
