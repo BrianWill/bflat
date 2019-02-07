@@ -29,6 +29,8 @@ const minScroll = 0;
 const keyboardScrollSpeed = 0.40;  // pixels per second
 const wheelScrollSpeed = 0.6;  // weight for wheel's event.deltaY
 
+const mousemoveRateLimit = 30;  // milliseconds between updating selection drag
+
 ctx.font = defaultFont;
 const characterWidth = ctx.measureText('12345').width / 5;  // more than 1 character so to get average (not sure if result would be different)
 
@@ -54,8 +56,10 @@ var cursorShown = true;
 
 var scrollUpKeyIsDown = false;
 var scrollDownKeyIsDown = false;
+var mouseDown = false;
 
 var resizeTimeoutHandle;
+var lastMouseTimestamp = 0;
 
 var maxScroll = 0; // todo
 var currentScroll = 0;
@@ -216,42 +220,42 @@ function drawSelection(ctx) {
             lineHeight
         );
         // draw middle selection lines
-        let numLines = selectionLine - cursorLine - 1;
-        if (numLines > 0) {
+        let y = firstLineOffsetY + lineHeight * (cursorLine + 1) - currentScroll + adjustmentY;
+        for (let i = cursorLine + 1; i < selectionLine; i++) {
             ctx.fillRect(
                 lineOffsetX,
-                firstLineOffsetY + lineHeight * (cursorLine + 1) - currentScroll + adjustmentY,
-                width - lineOffsetX,
-                lineHeight * numLines
+                y,
+                (textBuffer[i].length + 1) * characterWidth,
+                lineHeight
             );  
+            y += lineHeight;
         }
         // draw top selection line
-        let x = lineOffsetX + characterWidth * cursorPos;
         ctx.fillRect(
-            x,
+            lineOffsetX + characterWidth * cursorPos,
             firstLineOffsetY + lineHeight * cursorLine - currentScroll + adjustmentY,
-            width - x,
+            (textBuffer[cursorLine].length - cursorPos + 1) * characterWidth,
             lineHeight
         );
         return true;
     } else if (cursorLine > selectionLine) {
         // draw top selection line
-        let x = lineOffsetX + characterWidth * selectionPos;
         ctx.fillRect(
-            x,
+            lineOffsetX + characterWidth * selectionPos,
             firstLineOffsetY + lineHeight * selectionLine - currentScroll + adjustmentY,
-            width - x,
+            (textBuffer[selectionLine].length - selectionPos + 1) * characterWidth,
             lineHeight
         );
         // draw middle selection lines
-        let numLines = cursorLine - selectionLine - 1;
-        if (numLines > 0) {
+        let y = firstLineOffsetY + lineHeight * (selectionLine + 1) - currentScroll + adjustmentY;
+        for (let i = selectionLine + 1; i < cursorLine; i++) {
             ctx.fillRect(
                 lineOffsetX,
-                firstLineOffsetY + lineHeight * (selectionLine + 1) - currentScroll + adjustmentY,
-                width - lineOffsetX,
-                lineHeight * numLines
+                y,
+                (textBuffer[i].length + 1) * characterWidth,
+                lineHeight
             );  
+            y += lineHeight;
         }
         // draw bottom selection line
         ctx.fillRect(
@@ -274,6 +278,45 @@ window.addEventListener("resize", function (evt) {
     }, 150);
 }, false);
 
+
+// return false if area encompases no text (and so no delete)
+function deleteSelection() {
+    if (cursorPos === selectionPos && cursorLine === selectionLine) {
+        return false;
+    }
+    let newPos;
+    let newLine;
+    if (cursorLine === selectionLine) {
+        let line = textBuffer[cursorLine];
+        newLine = cursorLine; 
+        if (cursorPos < selectionPos) {
+            newPos = cursorPos;
+            textBuffer[cursorLine] = line.splice(cursorPos, selectionPos - cursorPos, '');
+        } else {
+            newPos = selectionPos;
+            textBuffer[cursorLine] = line.splice(selectionPos, cursorPos - selectionPos, '');
+        }
+    } else if (cursorLine < selectionLine) {
+        newLine = cursorLine;
+        newPos = cursorPos;
+        let leading = textBuffer[cursorLine].slice(0, cursorPos);
+        let trailing = textBuffer[selectionLine].slice(selectionPos);
+        textBuffer.splice(cursorLine + 1, selectionLine - cursorLine);  // discard lines
+        textBuffer[cursorLine] = leading + trailing;
+    } else if (cursorLine > selectionLine) {
+        newLine = selectionLine;
+        newPos = selectionPos;
+        let leading = textBuffer[selectionLine].slice(0, selectionPos);
+        let trailing = textBuffer[cursorLine].slice(cursorPos);
+        textBuffer.splice(selectionLine + 1, cursorLine - selectionLine);  // discard lines
+        textBuffer[selectionLine] = leading + trailing;
+    }
+    cursorPos = newPos;
+    cursorLine = newLine;
+    selectionPos = newPos;
+    selectionLine = newLine;
+    return true;
+}
 
 // assumes no newlines
 function insertText(text) {
@@ -451,6 +494,10 @@ document.body.addEventListener('keydown', function (evt) {
     evt.stopPropagation();
     if (evt.metaKey) {
         switch (evt.key) {
+            case "r":
+            case "R":
+                // reload page
+                return;
             case "s":
             case "S":
                 evt.preventDefault();
@@ -499,11 +546,15 @@ document.body.addEventListener('keydown', function (evt) {
                 showCursor();
                 draw(ctx);
                 return;
+            default:
+                evt.preventDefault();
+                return;
         }
     }
     if (evt.key.length === 1) {
         let code = evt.key.charCodeAt(0);
         if (code >= 32) {   // if not a control character
+            deleteSelection();
             insertText(evt.key);
         } else {
             return;
@@ -627,7 +678,9 @@ document.body.addEventListener('keydown', function (evt) {
                 updateScrollAfterCursorMove(cursorLine);
                 break;
             case "Backspace":
-                if (cursorPos > 0 ) {
+                if (deleteSelection()) {
+                    updateMaxScroll();
+                } else if (cursorPos > 0 ) {
                     cursorPos--;
                     cursorPreferredPos = cursorPos;
                     let line = textBuffer[cursorLine];
@@ -647,7 +700,9 @@ document.body.addEventListener('keydown', function (evt) {
                 updateScrollAfterCursorMove(cursorLine);
                 break;
             case "Delete":
-                if (cursorPos < textBuffer[cursorLine].length) {
+                if (deleteSelection()) {
+                    updateMaxScroll();
+                } else if (cursorPos < textBuffer[cursorLine].length) {
                     let line = textBuffer[cursorLine];
                     textBuffer[cursorLine] = line.slice(0, cursorPos) + line.slice(cursorPos + 1);
                     cursorPreferredPos = cursorPos;
@@ -663,6 +718,7 @@ document.body.addEventListener('keydown', function (evt) {
                 updateScrollAfterCursorMove(cursorLine);
                 break;
             case "Enter":
+                deleteSelection();
                 let line = textBuffer[cursorLine];
                 textBuffer[cursorLine] = line.slice(0, cursorPos);
                 cursorLine++;
@@ -676,6 +732,7 @@ document.body.addEventListener('keydown', function (evt) {
                 break;
             case "Tab":
                 evt.preventDefault();
+                deleteSelection();
                 let numSpaces = numSpacesForTab - (cursorPos % numSpacesForTab);
                 let insert;
                 switch (numSpaces) {
@@ -716,9 +773,9 @@ document.body.addEventListener('wheel', function (evt) {
 
 editor.addEventListener('mousedown', function (evt) {
     // todo: using clientX/Y for now; should get relative from canvas (to allow a canvas editor that isn't full page)
-    const cursorOffsetY = 7;   // want text cursor to select as if from center of the cursor, not top (there's no way to get the cursor's actual height, so we guess its half height)
+    const textCursorOffsetY = 7;   // want text cursor to select as if from center of the cursor, not top (there's no way to get the cursor's actual height, so we guess its half height)
     let newPos = Math.round((evt.clientX - lineOffsetX) / characterWidth);
-    let newLine = Math.floor((evt.clientY - firstLineOffsetY + cursorOffsetY + currentScroll) / lineHeight);
+    let newLine = Math.floor((evt.clientY - firstLineOffsetY + textCursorOffsetY + currentScroll) / lineHeight);
     if (newPos < 0) {
         newPos = 0;
     }
@@ -738,9 +795,49 @@ editor.addEventListener('mousedown', function (evt) {
         selectionPos = cursorPos;
         selectionLine = cursorLine;
     }
+    mouseDown = true;
     updateScrollAfterCursorMove(cursorLine);
     showCursor();
     draw(ctx);
+}, false);
+
+
+editor.addEventListener('mouseup', function (evt) {
+    mouseDown = false;
+}, false);
+
+editor.addEventListener('mouseout', function (evt) {
+    mouseDown = false;
+}, false);
+
+
+editor.addEventListener('mousemove', function (evt) {
+    if (mouseDown) {
+        if ((evt.timeStamp - lastMouseTimestamp) > mousemoveRateLimit) {
+            lastMouseTimestamp = evt.timeStamp;
+            const textCursorOffsetY = 7;   // want text cursor to select as if from center of the cursor, not top (there's no way to get the cursor's actual height, so we guess its half height)
+            let newPos = Math.round((evt.clientX - lineOffsetX) / characterWidth);
+            let newLine = Math.floor((evt.clientY - firstLineOffsetY + textCursorOffsetY + currentScroll) / lineHeight);
+            if (newPos < 0) {
+                newPos = 0;
+            }
+            if (newLine < 0) {
+                newLine = 0;
+            }
+            if (newLine > textBuffer.length - 1) {
+                newLine = textBuffer.length - 1;
+            }
+            if (newPos > textBuffer[newLine].length) {
+                newPos = textBuffer[newLine].length;
+            }
+            cursorPos = newPos;
+            cursorPreferredPos = newPos;
+            cursorLine = newLine;
+            updateScrollAfterCursorMove(cursorLine);
+            showCursor();
+            draw(ctx);
+        }
+    }
 }, false);
 
 editor.addEventListener('focus', function (evt) {

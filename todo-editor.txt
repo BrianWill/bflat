@@ -8,21 +8,22 @@ clean up sloppy use of globals
     bundle cursor pos and selection info into a global object
 
 
-shift click selection
-    cursor moves with shift-click, but selection anchor pos/line does not
+don't draw selection lines that are out of view
 
 
 
 
-shift keyboard selection
+
+better scrolling while mouse dragging
 
 copy, cut
 
 
+change cmd-u cmd-i hotkeys into pageup/pagedown
+
+
 
 draw scrollbar indicator of current scroll position
-
-
 
 
 
@@ -31,7 +32,6 @@ offscreen canvas buffers for smooth scrolling (use at least 3, and copy from the
 
 
 
-mouse selection
 
 search and replace
 
