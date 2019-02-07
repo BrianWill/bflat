@@ -109,17 +109,7 @@ function updateMaxScroll() {
     }
 }
 
-function drawText(ctx, drawCursorLineHighlight) {
-    let numLines = Math.ceil(height / lineHeight) + 2;  // plus one extra line for partial in view up top, one extra for bottom
-    let firstLine = Math.floor(currentScroll / lineHeight) - 1;  // back one so as to partially show top line scrolling into view
-    if (firstLine < 0) {
-        firstLine = 0;
-    }
-    let lastLine = firstLine + numLines - 1;
-    if (lastLine > (textBuffer.length - 1)) {
-        lastLine = textBuffer.length - 1;
-    }
-
+function drawText(ctx, firstLine, lastLine, drawCursorLineHighlight) {
     // draw lines
     ctx.fillStyle = defaultTextColor;
     ctx.font = defaultFont;
@@ -188,7 +178,7 @@ function drawCursor(ctx) {
     );
 }
 
-function drawSelection(ctx) {
+function drawSelection(ctx, firstLine, lastLine) {
     const adjustmentY = -5;
     ctx.fillStyle = selectionColor;
     if (cursorLine === selectionLine) {
@@ -220,16 +210,26 @@ function drawSelection(ctx) {
             lineHeight
         );
         // draw middle selection lines
-        let y = firstLineOffsetY + lineHeight * (cursorLine + 1) - currentScroll + adjustmentY;
-        for (let i = cursorLine + 1; i < selectionLine; i++) {
-            ctx.fillRect(
-                lineOffsetX,
-                y,
-                (textBuffer[i].length + 1) * characterWidth,
-                lineHeight
-            );  
-            y += lineHeight;
-        }
+        let start = cursorLine + 1;
+        let end = selectionLine;
+        if (start <= lastLine && end >= firstLine) {
+            if (start < firstLine) {
+                start = firstLine;
+            }
+            if (end > lastLine) {
+                end = lastLine + 1;
+            }
+            let y = firstLineOffsetY + lineHeight * start - currentScroll + adjustmentY;
+            for (let i = start; i < end; i++) {
+                ctx.fillRect(
+                    lineOffsetX,
+                    y,
+                    (textBuffer[i].length + 1) * characterWidth,
+                    lineHeight
+                );  
+                y += lineHeight;
+            }
+        } 
         // draw top selection line
         ctx.fillRect(
             lineOffsetX + characterWidth * cursorPos,
@@ -247,15 +247,25 @@ function drawSelection(ctx) {
             lineHeight
         );
         // draw middle selection lines
-        let y = firstLineOffsetY + lineHeight * (selectionLine + 1) - currentScroll + adjustmentY;
-        for (let i = selectionLine + 1; i < cursorLine; i++) {
-            ctx.fillRect(
-                lineOffsetX,
-                y,
-                (textBuffer[i].length + 1) * characterWidth,
-                lineHeight
-            );  
-            y += lineHeight;
+        let start = selectionLine + 1;
+        let end = cursorLine;
+        if (start <= lastLine && end >= firstLine) {
+            if (start < firstLine) {
+                start = firstLine;
+            }
+            if (end > lastLine) {
+                end = lastLine + 1;
+            }
+            let y = firstLineOffsetY + lineHeight * start - currentScroll + adjustmentY;
+            for (let i = start; i < end; i++) {
+                ctx.fillRect(
+                    lineOffsetX,
+                    y,
+                    (textBuffer[i].length + 1) * characterWidth,
+                    lineHeight
+                );  
+                y += lineHeight;
+            }
         }
         // draw bottom selection line
         ctx.fillRect(
@@ -492,66 +502,66 @@ function updateScrollAfterCursorMove(line) {
 
 document.body.addEventListener('keydown', function (evt) {
     evt.stopPropagation();
-    if (evt.metaKey) {
-        switch (evt.key) {
-            case "r":
-            case "R":
-                // reload page
-                return;
-            case "s":
-            case "S":
-                evt.preventDefault();
-                return;
-            case "-":
-            case "=":
-            case "0":
-                return;
-            case "o":
-            case "O":
-                evt.preventDefault();
-                return;
-            case "u":
-            case "U":
-                evt.preventDefault();
-                if (scrollUpKeyIsDown || scrollDownKeyIsDown) {
-                    scrollUpKeyIsDown = false;
-                    scrollDownKeyIsDown = false;
-                } else {
-                    scrollUpKeyIsDown = true;
-                    scrollDownKeyIsDown = false;
-                }
-                return;
-            case "i":
-            case "I":
-                evt.preventDefault();
-                if (scrollUpKeyIsDown || scrollDownKeyIsDown) {
-                    scrollUpKeyIsDown = false;
-                    scrollDownKeyIsDown = false;
-                } else {
-                    scrollUpKeyIsDown = false;
-                    scrollDownKeyIsDown = true;
-                }
-                return;
-            case "k":
-            case "K":
-                evt.preventDefault();
-                deleteCurrentLine();
-                showCursor();
-                draw(ctx);
-                return;
-            case "v":
-            case "V":
-                evt.preventDefault();
-                paste();
-                showCursor();
-                draw(ctx);
-                return;
-            default:
-                evt.preventDefault();
-                return;
-        }
-    }
     if (evt.key.length === 1) {
+        if (evt.metaKey) {
+            switch (evt.key) {
+                case "r":
+                case "R":
+                    // reload page
+                    return;
+                case "s":
+                case "S":
+                    evt.preventDefault();
+                    return;
+                case "-":
+                case "=":
+                case "0":
+                    return;
+                case "o":
+                case "O":
+                    evt.preventDefault();
+                    return;
+                case "u":
+                case "U":
+                    evt.preventDefault();
+                    if (scrollUpKeyIsDown || scrollDownKeyIsDown) {
+                        scrollUpKeyIsDown = false;
+                        scrollDownKeyIsDown = false;
+                    } else {
+                        scrollUpKeyIsDown = true;
+                        scrollDownKeyIsDown = false;
+                    }
+                    return;
+                case "i":
+                case "I":
+                    evt.preventDefault();
+                    if (scrollUpKeyIsDown || scrollDownKeyIsDown) {
+                        scrollUpKeyIsDown = false;
+                        scrollDownKeyIsDown = false;
+                    } else {
+                        scrollUpKeyIsDown = false;
+                        scrollDownKeyIsDown = true;
+                    }
+                    return;
+                case "k":
+                case "K":
+                    evt.preventDefault();
+                    deleteCurrentLine();
+                    showCursor();
+                    draw(ctx);
+                    return;
+                case "v":
+                case "V":
+                    evt.preventDefault();
+                    paste();
+                    showCursor();
+                    draw(ctx);
+                    return;
+                default:
+                    evt.preventDefault();
+                    return;
+            }
+        }
         let code = evt.key.charCodeAt(0);
         if (code >= 32) {   // if not a control character
             deleteSelection();
@@ -875,8 +885,18 @@ function draw(ctx) {
     ctx.fillStyle = backgroundColor;
     ctx.fillRect(0, 0, width, height);
 
-    let selectionActive = drawSelection(ctx);
-    drawText(ctx, !selectionActive);
+    let numLines = Math.ceil(height / lineHeight) + 2;  // plus one extra line for partial in view up top, one extra for bottom
+    let firstLine = Math.floor(currentScroll / lineHeight) - 1;  // back one so as to partially show top line scrolling into view
+    if (firstLine < 0) {
+        firstLine = 0;
+    }
+    let lastLine = firstLine + numLines - 1;
+    if (lastLine > (textBuffer.length - 1)) {
+        lastLine = textBuffer.length - 1;
+    }
+
+    let selectionActive = drawSelection(ctx, firstLine, lastLine);
+    drawText(ctx, firstLine, lastLine, !selectionActive);
     if (cursorShown) {
         drawCursor(ctx);
     }

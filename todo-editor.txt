@@ -8,16 +8,12 @@ clean up sloppy use of globals
     bundle cursor pos and selection info into a global object
 
 
-don't draw selection lines that are out of view
-
-
-
-
-
 better scrolling while mouse dragging
 
 copy, cut
 
+
+better scroll adjust behavior when deleting/replacing selection when scrolled at bottom of text
 
 change cmd-u cmd-i hotkeys into pageup/pagedown
 
