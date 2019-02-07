@@ -1,8 +1,4 @@
 
-look at carota
-
-    uses div container for scroll bar; as scrolling, set style.top on position absolute canvas within, and 
-    redraw canavs to account for new scroll position
 
 clean up sloppy use of globals
     bundle cursor pos and selection info into a global object
@@ -10,7 +6,15 @@ clean up sloppy use of globals
 
 better scrolling while mouse dragging
 
-copy, cut
+
+cut
+
+default to copy/cut the current line if no selection?
+
+with multiple lines selected, shift-cmd-k should delete all of the lines
+
+browse files from server (a file browsing page with links to open each file in its own editor page)
+    for now, just use browser tabs for working with multiple files
 
 
 better scroll adjust behavior when deleting/replacing selection when scrolled at bottom of text

@@ -32,7 +32,8 @@ const wheelScrollSpeed = 0.6;  // weight for wheel's event.deltaY
 const mousemoveRateLimit = 30;  // milliseconds between updating selection drag
 
 ctx.font = defaultFont;
-const characterWidth = ctx.measureText('12345').width / 5;  // more than 1 character so to get average (not sure if result would be different)
+const characterWidth = ctx.measureText('12345').width / 5;  // more than 1 character so to get average 
+                                                            // (not sure if result of measuring one character would be different)
 
 /* global state */
 var width = document.body.clientWidth;
@@ -289,7 +290,8 @@ window.addEventListener("resize", function (evt) {
 }, false);
 
 
-// return false if area encompases no text (and so no delete)
+// return false if area encompases no text (and so no delete is performed)
+// updates cursor and selection states accordingly
 function deleteSelection() {
     if (cursorPos === selectionPos && cursorLine === selectionLine) {
         return false;
@@ -326,6 +328,35 @@ function deleteSelection() {
     selectionPos = newPos;
     selectionLine = newLine;
     return true;
+}
+
+// returns text in selection area (or empty string if no selected text) 
+function getSelection() {
+    if (cursorPos === selectionPos && cursorLine === selectionLine) {
+        return '';
+    }
+    if (cursorLine === selectionLine) {
+        let line = textBuffer[cursorLine];
+        return (cursorPos < selectionPos) ? line.slice(cursorPos, selectionPos) :
+            line.slice(selectionPos, cursorPos);
+    } else {
+        let startPos = cursorPos;
+        let startLine = cursorLine;
+        let endPos = selectionPos;
+        let endLine = selectionLine;
+        if (cursorLine > selectionLine) {
+            startPos = selectionPos;
+            startLine = selectionLine;
+            endPos = cursorPos;
+            endLine = cursorLine;
+        }
+        let s = textBuffer[startLine].slice(startPos);
+        for (let i = startLine + 1; i < endLine; i++) {
+            s += '\n' + textBuffer[i];
+        }
+        s += '\n' + textBuffer[endLine].slice(0, endPos);
+        return s;
+    }
 }
 
 // assumes no newlines
@@ -385,12 +416,14 @@ function paste() {
 }
 
 function copy() {
-    // todo
-    navigator.clipboard.writeText("<empty clipboard>").then(function() {
-        /* clipboard successfully set */
-    }, function() {
-    /* clipboard write failed */
-    });
+    let selection = getSelection();
+    if (selection) {
+        navigator.clipboard.writeText(selection).then(function(msg) {
+            console.log('successfully wrote to clipboard: ', msg); 
+        }, function() {
+            console.log('failed to write to clipboard'); 
+        });
+    }
 }
 
 function deleteCurrentLine() {
@@ -550,6 +583,11 @@ document.body.addEventListener('keydown', function (evt) {
                     showCursor();
                     draw(ctx);
                     return;
+                case "c":
+                case "C":
+                        evt.preventDefault();
+                        copy();
+                        return;
                 case "v":
                 case "V":
                     evt.preventDefault();
