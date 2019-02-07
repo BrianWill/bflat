@@ -1,10 +1,6 @@
-var editor = document.getElementById('editor');
-var ctx = editor.getContext('2d');
-
-var width = document.body.clientWidth;
-var height = document.body.clientHeight;
-
-var editorHasFocus = false;
+/* constants */
+const editor = document.getElementById('editor');
+const ctx = editor.getContext('2d');
 
 const firstLineOffsetY = 10;
 const lineOffsetX = 90;
@@ -14,14 +10,7 @@ const lineHeight = 26;  // todo: set proportional to font
 const cursorWidth = 2;
 const cursorHeight = 23;
 const cursorOffsetY = -4;
-var cursorShown = true;
 const cursorBlinkTime = 620;
-
-var textBuffer = ["Hello, there.", "Why hello there.", "      General Kenobi."];
-var cursorPos = 0;    // position within line, 0 is before first character, line.length is just after last character
-var cursorPreferredPos = 0;    // when moving cursor up and down, prefer this for new cursorPos
-var cursorLine = 0;
-
 
 const numSpacesForTab = 4;
 const space1 = ' ';
@@ -29,16 +18,39 @@ const space2 = '  ';
 const space3 = '   ';
 const space4 = '    ';
 
-
 const defaultTextColor = '#ddd';
 const lineNumberColor = '#999';
 const backgroundColor = '#422';
 const defaultFont = "13pt Menlo, Monaco, 'Courier New', monospace";
 
-
+const minScroll = 0;
+const keyboardScrollSpeed = 0.40;  // pixels per second
 
 ctx.font = defaultFont;
 const characterWidth = ctx.measureText('12345').width / 5;  // more than 1 character so to get average (not sure if result would be different)
+
+/* global state */
+var width = document.body.clientWidth;
+var height = document.body.clientHeight;
+
+var textBuffer = ["Hello, there.", "Why hello there.", "      General Kenobi."];
+for (let i = 0; i < 70; i++) {
+    textBuffer.push('asdf qwerty asdf qwerty jlcxoviu@#$ xkvjxlkvjef');
+}
+var cursorPos = 0;    // position within line, 0 is before first character, line.length is just after last character
+var cursorPreferredPos = 0;    // when moving cursor up and down, prefer this for new cursorPos
+var cursorLine = 0;
+
+var editorHasFocus = false;
+var cursorShown = true;
+
+var scrollUpKeyIsDown = false;
+var scrollDownKeyIsDown = false;
+
+var resizeTimeoutHandle;
+
+var maxScroll = 0; // todo
+var currentScroll = 0;
 
 
 if (!String.prototype.splice) {
@@ -70,21 +82,41 @@ function sizeCanvas() {
     editor.style.width = width + 'px';
     editor.style.height = height + 'px';
     ctx.scale(ratio, ratio);
+    updateMaxScroll();
 }
 
+
+function updateMaxScroll() {
+    // subtract only half height so we can scroll a bit past last line
+    maxScroll = lineHeight * textBuffer.length - (height / 2) + firstLineOffsetY;
+    if (maxScroll <  0) {
+        maxScroll = 0;
+    }
+}
 
 function drawText(ctx) {
     // clear screen
     ctx.fillStyle = backgroundColor;
     ctx.fillRect(0, 0, width, height);
 
+    let numLines = Math.ceil(height / lineHeight) + 3;  // plus a few extra lines overdraw for comfort
+    let firstLine = Math.floor(currentScroll / lineHeight) - 1;  // back one for comfort
+    if (firstLine < 0) {
+        firstLine = 0;
+    }
+    let lastLine = firstLine + numLines - 1;
+    if (lastLine > (textBuffer.length - 1)) {
+        lastLine = textBuffer.length - 1;
+    }
+
     // draw lines
     ctx.fillStyle = defaultTextColor;
     ctx.font = defaultFont;
     ctx.textBaseline = 'top';
     ctx.textAlign = 'start';
-    let y = firstLineOffsetY;
-    for (let i = 0; i < textBuffer.length; i++) {
+    let startY = firstLineOffsetY - currentScroll + lineHeight * firstLine;
+    let y = startY;
+    for (let i = firstLine; i <= lastLine; i++) {
         let line = textBuffer[i];
         ctx.fillText(line, lineOffsetX, y);
         y += lineHeight;
@@ -93,10 +125,36 @@ function drawText(ctx) {
     // draw line numbers
     ctx.textAlign = 'right';
     ctx.fillStyle = lineNumberColor;
-    y = firstLineOffsetY;
-    for (let i = 0; i < textBuffer.length; i++) {
+    y = startY;
+    for (let i = firstLine; i <= lastLine; i++) {
         ctx.fillText(i + 1, lineOffsetX - numbersOffsetX, y);
         y += lineHeight;
+    }
+}
+
+
+
+
+// delta time
+function updateScroll(dt) {
+    if (scrollUpKeyIsDown && scrollDownKeyIsDown) {
+        // do nothing
+    } else if (scrollUpKeyIsDown) {
+        currentScroll -= (keyboardScrollSpeed * dt);
+        if (currentScroll < 0) {
+            currentScroll = 0;
+            scrollUpKeyIsDown = false;
+            scrollDownKeyIsDown = false;
+        }
+        draw(ctx);
+    } else if (scrollDownKeyIsDown) {
+        currentScroll += (keyboardScrollSpeed * dt);
+        if (currentScroll > maxScroll) {
+            currentScroll = maxScroll;
+            scrollUpKeyIsDown = false;
+            scrollDownKeyIsDown = false;
+        }
+        draw(ctx);
     }
 }
 
@@ -108,23 +166,20 @@ function drawCursor(ctx) {
     const cursorColor = 'rgba(255, 255, 0, 0.8)';
     ctx.fillStyle = cursorColor;
     ctx.fillRect(lineOffsetX + characterWidth * cursorPos, 
-        firstLineOffsetY + cursorOffsetY + lineHeight * cursorLine,
+        firstLineOffsetY + cursorOffsetY + lineHeight * cursorLine - currentScroll,
         cursorWidth, 
         cursorHeight
     );
 }
 
 
-
-var timeoutHandle;
 window.addEventListener("resize", function (evt) {
-    window.clearTimeout(timeoutHandle);
-    timeoutHandle = window.setTimeout(function () {
+    window.clearTimeout(resizeTimeoutHandle);
+    resizeTimeoutHandle = window.setTimeout(function () {
         sizeCanvas();
         draw(ctx);
     }, 150);
 }, false);
-
 
 
 // assumes no newlines
@@ -133,6 +188,57 @@ function insertText(text) {
     textBuffer[cursorLine] = line.splice(cursorPos, 0, text);
     cursorPos += text.length;
     cursorPreferredPos = cursorPos;
+}
+
+navigator.permissions.query({name:'clipboard-read'}).then(function(result) {
+    if (result.state == 'granted') {
+      console.log('clipboard-read permission granted');
+    } else if (result.state == 'prompt') {
+        console.log('clipboard-read permission prompt');
+    }
+    // Don't do anything if the permission was denied.
+});
+
+// accounts for newlines in the inserted text
+function insertTextMultiline(text) {
+    let lines = text.split('\n');
+    if (lines.length === 1) {
+        insertText(text);
+        return;
+    }
+    let line = textBuffer[cursorLine];
+    let preceding = line.slice(0, cursorPos);
+    let following = line.slice(cursorPos);
+    lines[0] = preceding + lines[0];
+    cursorPos = lines[lines.length - 1].length;
+    cursorPreferredPos = cursorPos;
+    lines[lines.length - 1] = lines[lines.length - 1] + following;
+    textBuffer.splice(cursorLine, 1, ...lines);
+    cursorLine += lines.length - 1;
+    updateMaxScroll();
+}
+
+function paste() {
+    console.log('pasting');
+    navigator.clipboard.readText().then(text => {
+        // `text` contains the text read from the clipboard
+        console.log('Text: ', text);
+        insertTextMultiline(text);
+        showCursor();
+        draw(ctx);
+    }).catch(err => {
+        // maybe user didn't grant access to read from clipboard
+        console.log('Something went wrong reading clipboard: ', err);
+    });
+}
+
+function copy() {
+    // todo
+    navigator.clipboard.writeText("<empty clipboard>").then(function() {
+        /* clipboard successfully set */
+    }, function() {
+    /* clipboard write failed */
+    });
 }
 
 function deleteCurrentLine() {
@@ -153,6 +259,7 @@ function deleteCurrentLine() {
             cursorPos = newLineLength;
             cursorPreferredPos = newLineLength;
         }
+        updateMaxScroll();
     }
 }
 
@@ -203,34 +310,72 @@ function nextWhitespaceSkip(cursorPos, cursorLine, textBuffer) {
     }
 }
 
+document.body.addEventListener('keyup', function (evt) {
+    if (evt.key === 'Meta') {
+        scrollUpKeyIsDown = false;
+        scrollDownKeyIsDown = false;
+    }
+}, false);
+
+
 document.body.addEventListener('keydown', function (evt) {
-    console.log(evt);
     evt.stopPropagation();
+    if (evt.metaKey) {
+        switch (evt.key) {
+            case "s":
+            case "S":
+                evt.preventDefault();
+                return;
+            case "-":
+            case "=":
+            case "0":
+                return;
+            case "o":
+            case "O":
+                evt.preventDefault();
+                return;
+            case "u":
+            case "U":
+                evt.preventDefault();
+                if (scrollUpKeyIsDown || scrollDownKeyIsDown) {
+                    scrollUpKeyIsDown = false;
+                    scrollDownKeyIsDown = false;
+                } else {
+                    scrollUpKeyIsDown = true;
+                    scrollDownKeyIsDown = false;
+                }
+                return;
+            case "i":
+            case "I":
+                evt.preventDefault();
+                if (scrollUpKeyIsDown || scrollDownKeyIsDown) {
+                    scrollUpKeyIsDown = false;
+                    scrollDownKeyIsDown = false;
+                } else {
+                    scrollUpKeyIsDown = false;
+                    scrollDownKeyIsDown = true;
+                }
+                return;
+            case "k":
+            case "K":
+                evt.preventDefault();
+                deleteCurrentLine();
+                showCursor();
+                draw(ctx);
+                return;
+            case "v":
+            case "V":
+                evt.preventDefault();
+                paste();
+                showCursor();
+                draw(ctx);
+                return;
+        }
+    }
     if (evt.key.length === 1) {
         let code = evt.key.charCodeAt(0);
         if (code >= 32) {   // if not a control character
-            if (evt.metaKey) {
-                switch (evt.key) {
-                    case "s":
-                    case "S":
-                        evt.preventDefault();
-                        return;
-                    case "-":
-                    case "=":
-                    case "0":
-                        return;
-                    case "o":
-                    case "O":
-                        evt.preventDefault();
-                        return
-                    case "k":
-                    case "K":
-                        deleteCurrentLine();
-                        break;
-                }
-            } else {
-                insertText(evt.key);
-            }
+            insertText(evt.key);
         } else {
             return;
         }
@@ -239,6 +384,7 @@ document.body.addEventListener('keydown', function (evt) {
             // generally immitates VSCode behavior
             case "ArrowLeft":
                 if (evt.metaKey) {
+                    evt.preventDefault();
                     let line = textBuffer[cursorLine];
                     let trimmed = line.trimStart();
                     let newPos = line.length - trimmed.length; 
@@ -271,6 +417,7 @@ document.body.addEventListener('keydown', function (evt) {
                 break;
             case "ArrowRight":
                 if (evt.metaKey) {
+                    evt.preventDefault();
                     cursorPos = textBuffer[cursorLine].length;
                     cursorPreferredPos = cursorPos;
                 } else if (evt.altKey) {
@@ -329,6 +476,7 @@ document.body.addEventListener('keydown', function (evt) {
                     textBuffer.splice(cursorLine, 1);
                     cursorPos = prevLine.length;
                     cursorLine = prevLineIdx;
+                    updateMaxScroll();
                 }
                 break;
             case "Delete":
@@ -339,6 +487,7 @@ document.body.addEventListener('keydown', function (evt) {
                 } else if (cursorLine < textBuffer.length - 1) {
                     textBuffer[cursorLine] = textBuffer[cursorLine] + textBuffer[cursorLine + 1];
                     textBuffer.splice(cursorLine + 1, 1);
+                    updateMaxScroll();
                 }
                 break;
             case "Enter":
@@ -348,6 +497,7 @@ document.body.addEventListener('keydown', function (evt) {
                 textBuffer.splice(cursorLine, 0, line.slice(cursorPos));
                 cursorPos = 0;
                 cursorPreferredPos = cursorPos;
+                updateMaxScroll();
                 break;
             case "Tab":
                 evt.preventDefault();
@@ -377,11 +527,13 @@ document.body.addEventListener('keydown', function (evt) {
     draw(ctx);
 }, false);
 
+
+
 editor.addEventListener('mousedown', function (evt) {
     // todo: using clientX/Y for now; should get relative from canvas (to allow a canvas editor that isn't full page)
     const cursorOffsetY = 7;   // want text cursor to select as if from center of the cursor, not top (there's no way to get the cursor's actual height, so we guess its half height)
     let newPos = Math.round((evt.clientX - lineOffsetX) / characterWidth);
-    let newLine = Math.floor((evt.clientY - firstLineOffsetY + cursorOffsetY) / lineHeight);
+    let newLine = Math.floor((evt.clientY - firstLineOffsetY + cursorOffsetY + currentScroll) / lineHeight);
     if (newPos < 0) {
         newPos = 0;
     }
@@ -438,7 +590,26 @@ function draw(ctx) {
     }
 }
 
+var priorTimestamp = 0;
+function step(timestamp) {
+    const maxDt = 400;
+    let dt = timestamp - priorTimestamp;
+    if (dt > maxDt) {
+        dt = maxDt;
+    }
+    priorTimestamp = timestamp;
+    //console.log(dt);
+    updateScroll(dt);
+    window.requestAnimationFrame(step);
+}
+
 sizeCanvas();
 showCursor();
 draw(ctx);
 editor.focus();
+window.requestAnimationFrame(step);
+
+
+// window.setInterval(function (evt) {
+//     updateScroll();
+// }, 200);
