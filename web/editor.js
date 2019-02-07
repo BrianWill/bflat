@@ -19,12 +19,14 @@ const space3 = '   ';
 const space4 = '    ';
 
 const defaultTextColor = '#ddd';
-const lineNumberColor = '#999';
+const lineNumberColor = '#887';
 const backgroundColor = '#422';
+const lineHighlightColor = '#733';
 const defaultFont = "13pt Menlo, Monaco, 'Courier New', monospace";
 
 const minScroll = 0;
 const keyboardScrollSpeed = 0.40;  // pixels per second
+const wheelScrollSpeed = 0.6;  // weight for wheel's event.deltaY
 
 ctx.font = defaultFont;
 const characterWidth = ctx.measureText('12345').width / 5;  // more than 1 character so to get average (not sure if result would be different)
@@ -34,7 +36,7 @@ var width = document.body.clientWidth;
 var height = document.body.clientHeight;
 
 var textBuffer = ["Hello, there.", "Why hello there.", "      General Kenobi."];
-for (let i = 0; i < 70; i++) {
+for (let i = 0; i < 50; i++) {
     textBuffer.push('asdf qwerty asdf qwerty jlcxoviu@#$ xkvjxlkvjef');
 }
 var cursorPos = 0;    // position within line, 0 is before first character, line.length is just after last character
@@ -89,8 +91,11 @@ function sizeCanvas() {
 function updateMaxScroll() {
     // subtract only half height so we can scroll a bit past last line
     maxScroll = lineHeight * textBuffer.length - (height / 2) + firstLineOffsetY;
-    if (maxScroll <  0) {
+    if (maxScroll < 0) {
         maxScroll = 0;
+    }
+    if (currentScroll > maxScroll) {
+        currentScroll = maxScroll;
     }
 }
 
@@ -118,6 +123,13 @@ function drawText(ctx) {
     let y = startY;
     for (let i = firstLine; i <= lastLine; i++) {
         let line = textBuffer[i];
+        if (i === cursorLine) {
+            const highlightOffsetY = 5;
+            ctx.fillStyle = lineHighlightColor;
+            ctx.fillRect(0, y - highlightOffsetY, width, lineHeight);
+            ctx.fillStyle = defaultTextColor;
+            ctx.font = defaultFont;
+        }
         ctx.fillText(line, lineOffsetX, y);
         y += lineHeight;
     }
@@ -131,9 +143,6 @@ function drawText(ctx) {
         y += lineHeight;
     }
 }
-
-
-
 
 // delta time
 function updateScroll(dt) {
@@ -188,6 +197,7 @@ function insertText(text) {
     textBuffer[cursorLine] = line.splice(cursorPos, 0, text);
     cursorPos += text.length;
     cursorPreferredPos = cursorPos;
+    updateScrollAfterCursorMove(cursorLine);
 }
 
 navigator.permissions.query({name:'clipboard-read'}).then(function(result) {
@@ -216,6 +226,7 @@ function insertTextMultiline(text) {
     textBuffer.splice(cursorLine, 1, ...lines);
     cursorLine += lines.length - 1;
     updateMaxScroll();
+    updateScrollAfterCursorMove(cursorLine);
 }
 
 function paste() {
@@ -261,6 +272,7 @@ function deleteCurrentLine() {
         }
         updateMaxScroll();
     }
+    updateScrollAfterCursorMove(cursorLine);
 }
 
 function prevWhitespaceSkip(cursorPos, cursorLine, textBuffer) {
@@ -317,6 +329,32 @@ document.body.addEventListener('keyup', function (evt) {
     }
 }, false);
 
+
+// returns [min, max]
+function minMaxScrollForLine(line) {
+    const maxAdjustment = -6;
+    const minAdjustment = 12;
+    let max = line * lineHeight + firstLineOffsetY;  // max is top of the line
+    let min = max - height + lineHeight;
+    max += maxAdjustment;
+    min += minAdjustment;
+    if (max > maxScroll) {
+        max = maxScroll;
+    }
+    if (min < 0) {
+        min = 0;
+    }
+    return [min, max]
+}
+
+function updateScrollAfterCursorMove(line) {
+    let [min, max] = minMaxScrollForLine(line);
+    if (currentScroll < min) {
+        currentScroll = min;
+    } else if (currentScroll > max) {
+        currentScroll = max;
+    }
+}
 
 document.body.addEventListener('keydown', function (evt) {
     evt.stopPropagation();
@@ -414,6 +452,7 @@ document.body.addEventListener('keydown', function (evt) {
                         cursorPreferredPos = cursorPos;
                     }
                 }
+                updateScrollAfterCursorMove(cursorLine);
                 break;
             case "ArrowRight":
                 if (evt.metaKey) {
@@ -440,6 +479,7 @@ document.body.addEventListener('keydown', function (evt) {
                         cursorPreferredPos = cursorPos;
                     }
                 }
+                updateScrollAfterCursorMove(cursorLine);
                 break;
             case "ArrowUp":
                 if (cursorLine > 0) {
@@ -451,6 +491,7 @@ document.body.addEventListener('keydown', function (evt) {
                         cursorPos = newLineLength;
                     }
                 }
+                updateScrollAfterCursorMove(cursorLine);
                 break;
             case "ArrowDown":
                 if (cursorLine < textBuffer.length - 1) {
@@ -462,6 +503,7 @@ document.body.addEventListener('keydown', function (evt) {
                         cursorPos = newLineLength;
                     }
                 }
+                updateScrollAfterCursorMove(cursorLine);
                 break;
             case "Backspace":
                 if (cursorPos > 0 ) {
@@ -478,6 +520,7 @@ document.body.addEventListener('keydown', function (evt) {
                     cursorLine = prevLineIdx;
                     updateMaxScroll();
                 }
+                updateScrollAfterCursorMove(cursorLine);
                 break;
             case "Delete":
                 if (cursorPos < textBuffer[cursorLine].length) {
@@ -489,6 +532,7 @@ document.body.addEventListener('keydown', function (evt) {
                     textBuffer.splice(cursorLine + 1, 1);
                     updateMaxScroll();
                 }
+                updateScrollAfterCursorMove(cursorLine);
                 break;
             case "Enter":
                 let line = textBuffer[cursorLine];
@@ -498,6 +542,7 @@ document.body.addEventListener('keydown', function (evt) {
                 cursorPos = 0;
                 cursorPreferredPos = cursorPos;
                 updateMaxScroll();
+                updateScrollAfterCursorMove(cursorLine);
                 break;
             case "Tab":
                 evt.preventDefault();
@@ -528,6 +573,16 @@ document.body.addEventListener('keydown', function (evt) {
 }, false);
 
 
+document.body.addEventListener('wheel', function (evt) {
+    currentScroll += Math.round(evt.deltaY * wheelScrollSpeed);
+    if (currentScroll < 0) {
+        currentScroll = 0;
+    } else if (currentScroll > maxScroll) {
+        currentScroll = maxScroll;
+    }
+    draw(ctx);
+}, false);
+
 
 editor.addEventListener('mousedown', function (evt) {
     // todo: using clientX/Y for now; should get relative from canvas (to allow a canvas editor that isn't full page)
@@ -549,6 +604,7 @@ editor.addEventListener('mousedown', function (evt) {
     cursorPos = newPos;
     cursorPreferredPos = newPos;
     cursorLine = newLine;
+    updateScrollAfterCursorMove(cursorLine);
     showCursor();
     draw(ctx);
 }, false);
@@ -608,8 +664,3 @@ showCursor();
 draw(ctx);
 editor.focus();
 window.requestAnimationFrame(step);
-
-
-// window.setInterval(function (evt) {
-//     updateScroll();
-// }, 200);

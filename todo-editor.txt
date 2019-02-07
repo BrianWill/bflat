@@ -4,24 +4,8 @@ look at carota
     uses div container for scroll bar; as scrolling, set style.top on position absolute canvas within, and 
     redraw canavs to account for new scroll position
 
-
-given currentScroll, figure out which lines are in view and only 
-    loop over those lines in drawText() (depends upon height of editor)
-
-    figure out maxScroll from number of lines
-
-
-
-vertical scroll
-
-set vertical scroll when cursor moves up down
-
-
-highlight line with cursor
-
-
-bundle cursor pos and selection info into a global object
-
+clean up sloppy use of globals
+    bundle cursor pos and selection info into a global object
 
 
 
@@ -31,11 +15,16 @@ copy, cut
 
 
 
+draw scrollbar indicator of current scroll position
+
+
+
+
+
 offscreen canvas buffers for smooth scrolling (use at least 3, and copy from these buffers to onscreen canvas)
     cursor is never rendered on off-screen bufffers, always rendered last on top of dispaly canvas
 
 
-mouse click for place cursor
 
 mouse selection
 
@@ -44,15 +33,6 @@ search and replace
 undo/redo
 
 multi-tabs
-
-efficient text buffer using TextArea? (presumably it could avoid producing so much garbage as user types)
-    native byte array? 
-
-    function bin2String(array) {
-        return String.fromCharCode.apply(String, array);
-    }
-
-    use views w/ buffers?
 
 
 don't preventDefault for some browser hotkeys (reload?, new tab? ctrl-s should not print a character)
@@ -68,15 +48,26 @@ option to insert actual tab characters instead of spaces
 support tab size other than 4 spaces
 
 
+ctrl-A
 
+
+
+prev/nextWhitespaceSkip should not skip past ( ) { } [ ]  ? desired behavior depends upon language mode
+
+
+efficient text buffer using TextArea? (presumably it could avoid producing so much garbage as user types)
+    native byte array? 
+
+    function bin2String(array) {
+        return String.fromCharCode.apply(String, array);
+    }
+
+    use views w/ buffers?
 
 
 firefox: dom.events.async.clipboard must be enabled in about:config? or is that only for file:///
     chrome will ask for permission repeatedly for clipboard permission when viewing page via file:/// 
         (serving via localhost fixes problem)
-
-prev/nextWhitespaceSkip should not skip past ( ) { } [ ]  ? desired behavior depends upon language mode
-
 
 
 LOL: https://www.w3.org/TR/2dcontext/#best-practices
