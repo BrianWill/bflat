@@ -2,7 +2,7 @@
 const editor = document.getElementById('editor');
 const ctx = editor.getContext('2d');
 
-const firstLineOffsetY = 10;
+const firstLineOffsetY = 6;
 const lineOffsetX = 90;
 const numbersOffsetX = 30;
 
@@ -21,6 +21,7 @@ const space4 = '    ';
 const defaultTextColor = '#ddd';
 const lineNumberColor = '#887';
 const backgroundColor = '#422';
+const selectionColor = '#78992c';
 const lineHighlightColor = '#733';
 const defaultFont = "13pt Menlo, Monaco, 'Courier New', monospace";
 
@@ -40,8 +41,13 @@ for (let i = 0; i < 50; i++) {
     textBuffer.push('asdf qwerty asdf qwerty jlcxoviu@#$ xkvjxlkvjef');
 }
 var cursorPos = 0;    // position within line, 0 is before first character, line.length is just after last character
-var cursorPreferredPos = 0;    // when moving cursor up and down, prefer this for new cursorPos
 var cursorLine = 0;
+var cursorPreferredPos = 0;    // when moving cursor up and down, prefer this for new cursorPos 
+                               // (based on its position when last set by left/right arrow or click cursor move)
+
+// when selection pos/line matches cursor, no selection is active
+var selectionPos = 0; 
+var selectionLine = 0; 
 
 var editorHasFocus = false;
 var cursorShown = true;
@@ -90,7 +96,7 @@ function sizeCanvas() {
 
 function updateMaxScroll() {
     // subtract only half height so we can scroll a bit past last line
-    maxScroll = lineHeight * textBuffer.length - (height / 2) + firstLineOffsetY;
+    maxScroll = lineHeight * textBuffer.length - (height / 2);
     if (maxScroll < 0) {
         maxScroll = 0;
     }
@@ -99,13 +105,9 @@ function updateMaxScroll() {
     }
 }
 
-function drawText(ctx) {
-    // clear screen
-    ctx.fillStyle = backgroundColor;
-    ctx.fillRect(0, 0, width, height);
-
-    let numLines = Math.ceil(height / lineHeight) + 3;  // plus a few extra lines overdraw for comfort
-    let firstLine = Math.floor(currentScroll / lineHeight) - 1;  // back one for comfort
+function drawText(ctx, drawCursorLineHighlight) {
+    let numLines = Math.ceil(height / lineHeight) + 2;  // plus one extra line for partial in view up top, one extra for bottom
+    let firstLine = Math.floor(currentScroll / lineHeight) - 1;  // back one so as to partially show top line scrolling into view
     if (firstLine < 0) {
         firstLine = 0;
     }
@@ -123,10 +125,10 @@ function drawText(ctx) {
     let y = startY;
     for (let i = firstLine; i <= lastLine; i++) {
         let line = textBuffer[i];
-        if (i === cursorLine) {
+        if (drawCursorLineHighlight && i === cursorLine) {
             const highlightOffsetY = 5;
             ctx.fillStyle = lineHighlightColor;
-            ctx.fillRect(0, y - highlightOffsetY, width, lineHeight);
+            ctx.fillRect(lineOffsetX, y - highlightOffsetY, width, lineHeight);
             ctx.fillStyle = defaultTextColor;
             ctx.font = defaultFont;
         }
@@ -174,11 +176,93 @@ function drawCursor(ctx) {
     }
     const cursorColor = 'rgba(255, 255, 0, 0.8)';
     ctx.fillStyle = cursorColor;
-    ctx.fillRect(lineOffsetX + characterWidth * cursorPos, 
+    ctx.fillRect(
+        lineOffsetX + characterWidth * cursorPos, 
         firstLineOffsetY + cursorOffsetY + lineHeight * cursorLine - currentScroll,
         cursorWidth, 
         cursorHeight
     );
+}
+
+function drawSelection(ctx) {
+    const adjustmentY = -5;
+    ctx.fillStyle = selectionColor;
+    if (cursorLine === selectionLine) {
+        if (cursorPos === selectionPos) {
+            // draw nothing
+        } else if (cursorPos < selectionPos) {
+            ctx.fillRect(
+                lineOffsetX + characterWidth * cursorPos, 
+                firstLineOffsetY + lineHeight * cursorLine - currentScroll + adjustmentY,
+                (selectionPos - cursorPos) * characterWidth,
+                lineHeight
+            );
+            return true;
+        } else if (cursorPos > selectionPos) {
+            ctx.fillRect(
+                lineOffsetX + characterWidth * selectionPos, 
+                firstLineOffsetY + lineHeight * cursorLine - currentScroll + adjustmentY,
+                (cursorPos - selectionPos) * characterWidth,
+                lineHeight
+            );
+            return true;
+        }
+    } else if (cursorLine < selectionLine) {
+        // draw bottom selection line
+        ctx.fillRect(
+            lineOffsetX,
+            firstLineOffsetY + lineHeight * selectionLine - currentScroll + adjustmentY,
+            selectionPos * characterWidth,
+            lineHeight
+        );
+        // draw middle selection lines
+        let numLines = selectionLine - cursorLine - 1;
+        if (numLines > 0) {
+            ctx.fillRect(
+                lineOffsetX,
+                firstLineOffsetY + lineHeight * (cursorLine + 1) - currentScroll + adjustmentY,
+                width - lineOffsetX,
+                lineHeight * numLines
+            );  
+        }
+        // draw top selection line
+        let x = lineOffsetX + characterWidth * cursorPos;
+        ctx.fillRect(
+            x,
+            firstLineOffsetY + lineHeight * cursorLine - currentScroll + adjustmentY,
+            width - x,
+            lineHeight
+        );
+        return true;
+    } else if (cursorLine > selectionLine) {
+        // draw top selection line
+        let x = lineOffsetX + characterWidth * selectionPos;
+        ctx.fillRect(
+            x,
+            firstLineOffsetY + lineHeight * selectionLine - currentScroll + adjustmentY,
+            width - x,
+            lineHeight
+        );
+        // draw middle selection lines
+        let numLines = cursorLine - selectionLine - 1;
+        if (numLines > 0) {
+            ctx.fillRect(
+                lineOffsetX,
+                firstLineOffsetY + lineHeight * (selectionLine + 1) - currentScroll + adjustmentY,
+                width - lineOffsetX,
+                lineHeight * numLines
+            );  
+        }
+        // draw bottom selection line
+        ctx.fillRect(
+            lineOffsetX,
+            firstLineOffsetY + lineHeight * cursorLine - currentScroll + adjustmentY,
+            cursorPos * characterWidth,
+            lineHeight
+        );
+        return true;
+    }
+    return false;
 }
 
 
@@ -197,6 +281,8 @@ function insertText(text) {
     textBuffer[cursorLine] = line.splice(cursorPos, 0, text);
     cursorPos += text.length;
     cursorPreferredPos = cursorPos;
+    selectionPos = cursorPos;
+    selectionLine = cursorLine;
     updateScrollAfterCursorMove(cursorLine);
 }
 
@@ -225,6 +311,8 @@ function insertTextMultiline(text) {
     lines[lines.length - 1] = lines[lines.length - 1] + following;
     textBuffer.splice(cursorLine, 1, ...lines);
     cursorLine += lines.length - 1;
+    selectionPos = cursorPos;
+    selectionLine = cursorLine;
     updateMaxScroll();
     updateScrollAfterCursorMove(cursorLine);
 }
@@ -272,9 +360,12 @@ function deleteCurrentLine() {
         }
         updateMaxScroll();
     }
+    selectionPos = cursorPos;
+    selectionLine = cursorLine;
     updateScrollAfterCursorMove(cursorLine);
 }
 
+// returns new [pos, line], or null if cursor already at start of text
 function prevWhitespaceSkip(cursorPos, cursorLine, textBuffer) {
     let line = textBuffer[cursorLine];
     if (cursorPos === 0) {
@@ -431,6 +522,9 @@ document.body.addEventListener('keydown', function (evt) {
                     } else {
                         cursorPos = newPos;
                     }
+                    if (!evt.shiftKey) {
+                        selectionPos = cursorPos;
+                    }
                     cursorPreferredPos = cursorPos;
                 } else if (evt.altKey) {
                     let result = prevWhitespaceSkip(cursorPos, cursorLine, textBuffer);
@@ -438,6 +532,10 @@ document.body.addEventListener('keydown', function (evt) {
                         cursorPos = result[0];
                         cursorLine = result[1];
                         cursorPreferredPos = cursorPos;
+                        if (!evt.shiftKey) {
+                            selectionPos = cursorPos;
+                            selectionLine = cursorLine;
+                        }
                     }
                 } else {
                     if (cursorPos === 0) {
@@ -451,6 +549,10 @@ document.body.addEventListener('keydown', function (evt) {
                         cursorPos--;
                         cursorPreferredPos = cursorPos;
                     }
+                    if (!evt.shiftKey) {
+                        selectionPos = cursorPos;
+                        selectionLine = cursorLine;
+                    }
                 }
                 updateScrollAfterCursorMove(cursorLine);
                 break;
@@ -459,12 +561,19 @@ document.body.addEventListener('keydown', function (evt) {
                     evt.preventDefault();
                     cursorPos = textBuffer[cursorLine].length;
                     cursorPreferredPos = cursorPos;
+                    if (!evt.shiftKey) {
+                        selectionPos = cursorPos;
+                    }
                 } else if (evt.altKey) {
                     let result = nextWhitespaceSkip(cursorPos, cursorLine, textBuffer);
                     if (result) {
                         cursorPos = result[0];
                         cursorLine = result[1];
                         cursorPreferredPos = cursorPos;
+                        if (!evt.shiftKey) {
+                            selectionPos = cursorPos;
+                            selectionLine = cursorLine;
+                        }
                     }
                 } else {
                     if (cursorPos === textBuffer[cursorLine].length) {
@@ -478,6 +587,10 @@ document.body.addEventListener('keydown', function (evt) {
                         cursorPos++;
                         cursorPreferredPos = cursorPos;
                     }
+                    if (!evt.shiftKey) {
+                        selectionPos = cursorPos;
+                        selectionLine = cursorLine;
+                    }
                 }
                 updateScrollAfterCursorMove(cursorLine);
                 break;
@@ -489,6 +602,10 @@ document.body.addEventListener('keydown', function (evt) {
                         cursorPos = cursorPreferredPos;
                     } else {
                         cursorPos = newLineLength;
+                    }
+                    if (!evt.shiftKey) {
+                        selectionPos = cursorPos;
+                        selectionLine = cursorLine;
                     }
                 }
                 updateScrollAfterCursorMove(cursorLine);
@@ -502,6 +619,10 @@ document.body.addEventListener('keydown', function (evt) {
                     } else {
                         cursorPos = newLineLength;
                     }
+                    if (!evt.shiftKey) {
+                        selectionPos = cursorPos;
+                        selectionLine = cursorLine;
+                    }
                 }
                 updateScrollAfterCursorMove(cursorLine);
                 break;
@@ -511,6 +632,7 @@ document.body.addEventListener('keydown', function (evt) {
                     cursorPreferredPos = cursorPos;
                     let line = textBuffer[cursorLine];
                     textBuffer[cursorLine] = line.slice(0, cursorPos) + line.slice(cursorPos + 1);
+                    selectionPos = cursorPos;
                 } else if (cursorLine > 0) {
                     var prevLineIdx = cursorLine - 1;
                     var prevLine = textBuffer[prevLineIdx];
@@ -518,6 +640,8 @@ document.body.addEventListener('keydown', function (evt) {
                     textBuffer.splice(cursorLine, 1);
                     cursorPos = prevLine.length;
                     cursorLine = prevLineIdx;
+                    selectionPos = cursorPos;
+                    selectionLine = cursorLine;
                     updateMaxScroll();
                 }
                 updateScrollAfterCursorMove(cursorLine);
@@ -527,9 +651,13 @@ document.body.addEventListener('keydown', function (evt) {
                     let line = textBuffer[cursorLine];
                     textBuffer[cursorLine] = line.slice(0, cursorPos) + line.slice(cursorPos + 1);
                     cursorPreferredPos = cursorPos;
+                    selectionPos = cursorPos;
+                    selectionLine = cursorLine;
                 } else if (cursorLine < textBuffer.length - 1) {
                     textBuffer[cursorLine] = textBuffer[cursorLine] + textBuffer[cursorLine + 1];
                     textBuffer.splice(cursorLine + 1, 1);
+                    selectionPos = cursorPos;
+                    selectionLine = cursorLine;
                     updateMaxScroll();
                 }
                 updateScrollAfterCursorMove(cursorLine);
@@ -541,6 +669,8 @@ document.body.addEventListener('keydown', function (evt) {
                 textBuffer.splice(cursorLine, 0, line.slice(cursorPos));
                 cursorPos = 0;
                 cursorPreferredPos = cursorPos;
+                selectionPos = cursorPos;
+                selectionLine = cursorLine;
                 updateMaxScroll();
                 updateScrollAfterCursorMove(cursorLine);
                 break;
@@ -604,6 +734,10 @@ editor.addEventListener('mousedown', function (evt) {
     cursorPos = newPos;
     cursorPreferredPos = newPos;
     cursorLine = newLine;
+    if (!evt.shiftKey) {
+        selectionPos = cursorPos;
+        selectionLine = cursorLine;
+    }
     updateScrollAfterCursorMove(cursorLine);
     showCursor();
     draw(ctx);
@@ -640,7 +774,12 @@ function showCursor() {
 }
 
 function draw(ctx) {
-    drawText(ctx);
+    // clear screen
+    ctx.fillStyle = backgroundColor;
+    ctx.fillRect(0, 0, width, height);
+
+    let selectionActive = drawSelection(ctx);
+    drawText(ctx, !selectionActive);
     if (cursorShown) {
         drawCursor(ctx);
     }
@@ -654,7 +793,6 @@ function step(timestamp) {
         dt = maxDt;
     }
     priorTimestamp = timestamp;
-    //console.log(dt);
     updateScroll(dt);
     window.requestAnimationFrame(step);
 }

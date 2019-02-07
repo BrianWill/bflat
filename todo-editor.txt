@@ -8,8 +8,13 @@ clean up sloppy use of globals
     bundle cursor pos and selection info into a global object
 
 
+shift click selection
+    cursor moves with shift-click, but selection anchor pos/line does not
 
-shift selection
+
+
+
+shift keyboard selection
 
 copy, cut
 
