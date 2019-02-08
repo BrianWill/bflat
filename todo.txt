@@ -1,4 +1,104 @@
 
+I'VE FIGURED OUT INDEXING/DOT SYNTAX
+
+general syntax for indexing and field access is with []:
+
+    [a 0 .foo .ack 234 .bla]   // a[0].foo.ack[234].bla
+    [bar (foo 3) .ack]         // bar[foo(3)].bar.ack
+    [x .y .z]                  // x.y.z
+    [(foo 3) .bar .ack]        // (foo 3).bar.ack
+    
+the space before 'dot-name' can be ommitted when the dot-name follows another dot-name or the first element of the []
+
+    [a 0 .foo.ack 234 .bla]   // a[0].foo.ack[234].bla
+    [bar (foo 3) .ack]        // bar[foo(3)].bar.ack
+    [x.y.z]                   // x.y.z
+    [(foo 3).bar.ack]         // foo(3).bar.ack
+
+when the elements inside [] have no spaces between them, the surrounding [] can be omitted
+
+    [a 0 .foo.ack 234 .bla]   // [] required
+    [bar (foo 3) .ack]        // [] required
+    x.y.z                     // [] omitted
+    (foo 3).bar.ack           // [] omitted
+
+effectively, the [] are only required where indexing is involved
+
+// accounts for newlines in the inserted text
+func insertTextMultiline : text Str textBuffer A<Str> c Cursor
+    let lines (split text `\n`)
+    if (eq lines.length 1)
+        insertText text textBuffer cursor
+        return
+    let line [textBuffer c.line]
+    let preceding (slice line 0 c.pos)
+    let following (slice line c.pos)
+    as [lines 0] (add preceding [lines 0])
+    as c.pos [lines (dec lines.length) .length]
+    as c.preferredPos c.pos
+    as [lines (dec lines.length)] (add [lines (dec lines.length)] following)
+    splice textBuffer c.line 1 -xp lines
+    asAdd c.line (dec lines.length)
+    as c.selectionPos c.pos
+    as c.selectionLine c.line
+    updateMaxScroll
+
+
+because we want to avoid private helper functions nesting too far away from the
+    margin, we define a private helper function in a helper form at top level 
+    instead of inside the function they belong to:
+
+perhaps for first nested level, helper functions are written directly in the parent, but 
+    then for any subsequent nesting of helpers, you must use the helper form at top level?
+        so as a rule, named function defs are always started on first or second indentation stop, with
+        all helper functions written at second stop
+
+helper names given a highlight color similar to that of local variables, but they are not really locals
+
+(func foo
+
+)
+
+// helpers ack and bar private to foo
+(helper foo               
+    (func ack Str         
+        // ...body
+    )
+    (func bar
+    
+    )
+)
+
+// helper bar private to helper ack of foo
+(helper foo ack
+    (func bar Z : a A b B         
+        // ...body
+    )
+)
+
+// for a method in a class/struct, the helper form goes inside the class
+
+// OK to have multiple helper forms for same function/helper? don't see reason to allow this, just feels like bad style
+
+
+
+
+how to extract switch case to private helper without having to give it a name?
+    want to punt it to bottom, but let it automatically have identifier identical to the 
+        case expression, even if it's an expression?
+
+    casefunc `foo`       // private helper function that matches casefunc of switch above
+        // maybe have to give the switch itself a name?
+
+        // or just use autoId names (shown in editor as identicons)
+        // 'anonymous' functions that aren't really anonymous, they just don't have a visible name
+
+        // editor can have identiconHash's on any line (just draws line with extra space before next line 
+                // to fit the identicon)
+        // what about lineheight identicons (long rectangles); or perhaps wide rectangle taking up two lines vertically
+
+
+
 -  static property    
 
     allow initial value for property like with field?

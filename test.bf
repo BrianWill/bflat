@@ -5,7 +5,8 @@ something.test
     (as b (Bar))
 
     (var x A<I>)
-    (as x (A<I> -size 6)))
+    (as x (A<I> -size 6))
+)
 
 
     //(lisa Bar)
@@ -14,27 +15,31 @@ something.test
 
 (class Monkey : Bar Eater
     (m david
-        (var s Str [rubber Bar])
-        (as [zelda] 6.0)
+        (var s Str Bar.rubber)
+        (as me.zelda 6.0)
         (lisa me)
         (var b (Bar))
-        (as [evan] s)
-        (as s [evan]))
+        (as me.evan s)
+        (as s me.evan)
+    )
 
     (p evan Str
         (get)
             //(return [evan_])
         
-        (set)))
+        (set)
             //(as [evan_] value)
-
-
+    )
+)
 
 (interface Eater
     (m david)
 
-    (p evan Str))
+    (p evan Str)
+
     //(m david : I) // should be error because indistinguishable from previous overload
+)
+    
 
 
 
@@ -48,9 +53,12 @@ something.test
 
     (constructor 
         (var i 3)
-        (as i 5))
+        (as i 5)
+    )
         //(lisa me)
 
     (constructor : a Str
         (var i Str)
-        (as i `jsidfj`)))
+        (as i `jsidfj`)
+    )
+)

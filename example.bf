@@ -11,17 +11,19 @@ example
     (var arr A<I>)
     (var s Str steven)
     (as arr (A<I> -size (add 5 2)))
-    (as i [(add 4 i) arr])
-    (as [(add 4 i) arr] 8)
+    (as i [arr (add 4 i)])
+    (as [arr (add 4 i)] 8)
     (var monkeys (A<Bar> (Monkey) (Monkey)))
     (as i (add 5 3))
     (tracy)
-    (as i (ian Roger 2)))
+    (as i (ian Roger 2))
+)
 
 
 
 (func -static Harry kevin I : a I
-    (return (add a 4)))
+    (return (add a 4))
+)
 
 (class Foo 
 //    -where T -class IAlice 
@@ -32,10 +34,12 @@ example
 
     (m bar F : a I c I
         (var b Foo (Foo))
-        //(var i I [alice])
-        (as [alice] 9)
-        (var ack [alice])
-        (return 3.0)))
+        //(var i I me.alice)
+        (as me.alice 9)
+        (var ack me.alice)
+        (return 3.0)
+    )
+)
 
 
 (class Monkey : Bar Eater
@@ -43,7 +47,7 @@ example
     (m david
         (var i 3)
         (as i 5)
-        (as [zelda] 6.0)
+        (as me.zelda 6.0)
         (lisa me)
         (david me)
     )
