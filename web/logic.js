@@ -8,7 +8,7 @@ function insertText(text, textBuffer, cursor, editor) {
     textBuffer[c.line] = line.splice(c.pos, 0, text);
     c.pos += text.length;
     c.preferredPos = c.pos;
-    c.selectionPos = cursor.pos;
+    c.selectionPos = c.pos;
     c.selectionLine = c.line;
     updateScrollAfterCursorMove(c.line, editor);
 }
@@ -65,14 +65,14 @@ function deleteSelection(cursor, textBuffer) {
         pos = c.pos;
         let leading = tb[c.line].slice(0, c.pos);
         let trailing = tb[c.selectionLine].slice(c.selectionPos);
-        tb.splice(c.line + 1, c.selectionLine - c.line);  // discard lines
+        tb.splice(c.line, c.selectionLine - c.line);  // discard lines
         tb[c.line] = leading + trailing;
     } else if (c.line > c.selectionLine) {
         line = c.selectionLine;
         pos = c.selectionPos;
         let leading = tb[c.selectionLine].slice(0, c.selectionPos);
         let trailing = tb[c.line].slice(c.pos);
-        tb.splice(c.selectionLine + 1, c.line - c.selectionLine);  // discard lines
+        tb.splice(c.selectionLine, c.line - c.selectionLine);  // discard lines
         tb[c.selectionLine] = leading + trailing;
     }
     c.pos = pos;

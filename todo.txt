@@ -48,39 +48,77 @@ because we want to avoid private helper functions nesting too far away from the
     margin, we define a private helper function in a helper form at top level 
     instead of inside the function they belong to:
 
-perhaps for first nested level, helper functions are written directly in the parent, but 
-    then for any subsequent nesting of helpers, you must use the helper form at top level?
-        so as a rule, named function defs are always started on first or second indentation stop, with
-        all helper functions written at second stop
 
 helper names given a highlight color similar to that of local variables, but they are not really locals
 
-(func foo
-
-)
-
-// helpers ack and bar private to foo
-(helper foo               
-    (func ack Str         
-        // ...body
-    )
-    (func bar
-    
-    )
-)
-
-// helper bar private to helper ack of foo
-(helper foo ack
-    (func bar Z : a A b B         
-        // ...body
-    )
-)
 
 // for a method in a class/struct, the helper form goes inside the class
+
+ func foo
+    something
+    
+    // helpers ack and bar private to foo
+    -help
+    func ack Str         
+        other
+
+    -help
+    func bar
+        something
+
+    // helper bar private to helper ack of foo
+    -help ack
+    func bar Z : a A b B         
+        bla bla
+
+    // helper zap private to helper bar of ack of foo
+    -help ack bar
+    func zap Str : n I         
+        bla bla
+
 
 // OK to have multiple helper forms for same function/helper? don't see reason to allow this, just feels like bad style
 
 
+
+GO BACK TO INDENTATION-SENSATIVE SYNTAX
+    all lines except those beginning with symbols implicitly begin with (
+
+    even lines starting with explicit ( have an implicit ( because you might want:
+
+        (foo a b)
+            d e
+
+    ...with implicit parens surrounding 
+
+    use comma at start to supress implicit starting paren
+
+    if you want a string/number literal as first element in () that spans multiple lines:
+
+        (`hi` a b
+            c
+            d
+    
+    ...or even:
+
+        (
+            `hi` a b
+            c
+            d
+
+    open delimiters not closed on their own line given special highlighting
+
+    error if an implicit end paren matches an open paren on 
+        same line that isn't at start of line (or isn't just after starting comma)
+
+    end delimiters at end of line with no matching open delimiter are stripped by editing auto-correction
+
+
+when editing from known successful compilation state, edited lines are highlighted until the 
+    code successfully compiles again
+    one color to mean the edited lines don't parse, another color to mean there's a semantic problem
+    another color if the edited code now compiles but compilation errors have 
+    been introduced elsewhere (indicated by other highlighting on those problems)
 
 
 how to extract switch case to private helper without having to give it a name?
@@ -148,5 +186,5 @@ block x y : a b     // x y created and exist beyond the block; a and b are only 
 
 
 
-(import red.orange.blue -alias something)       // in case shortname conflicts with other import, give it alias
+(import red:orange:blue -alias something)       // in case shortname conflicts with other import, give it alias
                                  

@@ -3,6 +3,8 @@ encapsulate textbuffer
 encapsulate cursor / selection  ('Cursor'? 'CursorSelection', 'Pointer')
 
 
+in gopherjs code: event handlers should unpack events and send only properly typed args to other functions
+
 better scrolling while mouse dragging
 
 
@@ -16,14 +18,13 @@ browse files from server (a file browsing page with links to open each file in i
     for now, just use browser tabs for working with multiple files
 
 
-when mutli-lines selected:
-    tab adds leading spaces to the lines
-when line or multi-lines selected:
-    shift-tab removes leading spaces from the line(s)
+shift-tab removes leading spaces from line (or lines if multiple selected)
+
+when a selection is active, shift adds leading spaces to line(s) (multiple if multiple lines selected)
 
 better scroll adjust behavior when deleting/replacing selection when scrolled at bottom of text
 
-change cmd-u cmd-i hotkeys into pageup/pagedown
+change cmd-u cmd-i hotkeys into pageup/pagedown, also bind alt-up and alt-down
 
 
 
@@ -80,3 +81,47 @@ firefox: dom.events.async.clipboard must be enabled in about:config? or is that 
 
 
 LOL: https://www.w3.org/TR/2dcontext/#best-practices
+
+
+
+
+
+bflat highlighting policy:
+
+    put discoloration at start of any line that does NOT begin with an implicit paren
+    
+    hold alt to see all hidden parens (the hidden leading parens show up one spot to left of their actual 
+        position so as to avoid having to shift the code)
+    
+    as long as you follow the rules for open parens and indentation, any end parens at ends of 
+        lines with no matching open paren on same line can be stripped and then hidden end parens put 
+        in all the appropriate places
+
+given call to foo:
+
+    (foo
+        bar)
+
+...we can add second argument by just typing:
+
+    (foo
+        bar)
+        ack
+
+...which gets corrected to:
+
+    (foo
+        bar
+        ack)
+
+...in other words, invariants about indentation and open parens with no match on same line determines automatic placement
+    of the hidden end parens
+
+    when your code doesn't follow the invariants, you get error symbol in gutter next to lines that don't comply
+
+    the hidden parens get revealed when the cursor is right next to them
+        (rather than the rest of the line shift over, special highlighting indicates the paren isn't shown in its actual position 
+            and the spaces before it are missing one character) (perhaps show the floating dot symbol for each space so you can see 
+            that the leftmost one juts out of the margin? or just visually compact the 4 spaces to take up 3 spaces instead of 4?)
+
+    line with implicit paren that closes that paren at end AND has indented lines is a syntax ERROR

@@ -6,7 +6,7 @@ const defaultFont = "13pt Menlo, Monaco, 'Courier New', monospace"
 ctx.font = defaultFont;
 
 /* constants */
-var editor = {
+const editor = {
     ele: ele,
     ctx: ctx,
     defaultFont: defaultFont,
@@ -50,6 +50,8 @@ var editor = {
         blinkTime: 620,
     },
 };
+
+window.editor = editor;   // for debug
 
 editor.colors = Object.freeze(editor.colors);
 
